@@ -256,12 +256,14 @@ async def test_anonymous_caller_cannot_lower_floor_or_pick_model() -> None:
 
 
 def test_unlisted_hosted_model_has_a_quota() -> None:
-    """A hosted model missing from limits.yaml gets tpd=None, so check_quota never trips."""
+    """A hosted model missing from limits.yaml used to get tpd=None, so check_quota never
+    tripped. The fix chosen (V04 offered a default limit or a refusal) refuses such a model."""
+    from sre_shared.llm import UnknownModelError
+
     retr = StubRetriever([chunk(1)])
     ans = build_answerer(cast(Retriever, retr), config=CFG, embedder=FakeEmbedder())
-    client = ans._chat_for(AnswerConfig(model="groq:any-unlisted-model"))
-    assert client.spec.hosted
-    assert client.remaining_tokens() is not None
+    with pytest.raises(UnknownModelError, match="no tokens-per-day limit"):
+        ans._chat_for(AnswerConfig(model="groq:any-unlisted-model"))
 
 
 # == 5. SSE =================================================================================
