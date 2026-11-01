@@ -67,7 +67,7 @@ jobs:
       # The supabase image restarts once while initialising; wait until a real login works.
       - name: Wait for Postgres
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             if uv run python -c "import os, psycopg; psycopg.connect(os.environ['SRE_TEST_DATABASE_URL'], connect_timeout=3).execute('select 1')"; then
               exit 0
             fi
@@ -103,7 +103,8 @@ jobs:
           --health-retries 20
           --health-start-period 20s
     env:
-      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54400/postgres
+      ADMIN_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54400/postgres
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54400/sre_ci
       SRE_ENV: ci
     steps:
       - uses: actions/checkout@v4.2.2
@@ -130,16 +131,22 @@ jobs:
       - name: Install
         if: steps.ready.outputs.run == 'true'
         run: uv sync
+      # A fresh database from template1, as the test harness builds: the image's own
+      # `postgres` database carries Supabase's auth schema, where this role cannot create
+      # auth.jwt() ("permission denied for schema auth").
       - name: Create the schema
         if: steps.ready.outputs.run == 'true'
         run: |
-          for i in $(seq 1 60); do
-            if uv run python -c "import os, psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=3).execute('select 1')"; then break; fi
+          for _ in $(seq 1 60); do
+            if uv run python -c "import os, psycopg; psycopg.connect(os.environ['ADMIN_DATABASE_URL'], connect_timeout=3).execute('select 1')"; then break; fi
             sleep 2
           done
           uv run python - <<'PY'
           import os
+          import psycopg
           from sre_shared.testing.pg import BOOTSTRAP_SQL, apply_sql_files, migration_files
+          with psycopg.connect(os.environ["ADMIN_DATABASE_URL"], autocommit=True) as admin:
+              admin.execute("create database sre_ci template template1")
           apply_sql_files(os.environ["DATABASE_URL"], [BOOTSTRAP_SQL, *migration_files()])
           PY
       - name: Cache Hugging Face models
