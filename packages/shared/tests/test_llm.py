@@ -152,3 +152,11 @@ def test_local_models_get_a_longer_timeout() -> None:
     local = ChatClient(OLLAMA, limits=LIMITS, ledger=MemoryLedger())
     assert hosted._client.timeout == DEFAULT_TIMEOUT_S
     assert local._client.timeout == LOCAL_TIMEOUT_S > DEFAULT_TIMEOUT_S
+
+
+def test_a_provider_can_set_its_own_timeout() -> None:
+    limits = LIMITS.model_copy(deep=True)
+    setattr(limits.providers["groq"], "timeout_s", 240)  # extra="allow" on Provider
+    c = ChatClient(GROQ, limits=limits, ledger=MemoryLedger())
+    assert c._client.timeout == 240.0 and c._aclient.timeout == 240.0
+    assert ChatClient(GROQ, limits=LIMITS, ledger=MemoryLedger())._client.timeout == 60.0

@@ -185,7 +185,15 @@ class ChatClient:
         self.ledger: TokenLedger = ledger or (FileLedger() if spec.hosted else MemoryLedger())
         key = spec.api_key or "none"
         if timeout is None:
-            timeout = DEFAULT_TIMEOUT_S if spec.hosted else LOCAL_TIMEOUT_S
+            # A provider may set its own (`timeout_s` in limits.yaml): large models on free
+            # endpoints can take longer than 60 s for a long reply.
+            prov = limits.providers.get(spec.provider)
+            own = getattr(prov, "timeout_s", None) if prov is not None else None
+            timeout = (
+                float(own)
+                if own is not None
+                else (DEFAULT_TIMEOUT_S if spec.hosted else LOCAL_TIMEOUT_S)
+            )
         # Duck-typed on purpose: tests inject fakes with the `chat.completions.create` surface,
         # and messages are plain role/content dicts.
         self._client: Any = client or OpenAI(

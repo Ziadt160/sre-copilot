@@ -12,7 +12,7 @@ from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, SecretStr
+from pydantic import AliasChoices, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -65,7 +65,10 @@ class Settings(BaseSettings):
     # Model providers. Keys are optional: without them dev and CI use local Ollama.
     groq_api_key: SecretStr | None = None
     openrouter_api_key: SecretStr | None = None
-    nvidia_api_key: SecretStr | None = None  # build.nvidia.com; lab judges (decision 39)
+    # build.nvidia.com (NIM); lab judges (decision 39). Either variable name is read.
+    nvidia_api_key: SecretStr | None = Field(
+        default=None, validation_alias=AliasChoices("NVIDIA_API_KEY", "NIM_API_KEY")
+    )
     ollama_base_url: str = "http://127.0.0.1:11434"
 
     # Observability.

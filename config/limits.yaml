@@ -27,7 +27,8 @@ providers:
   nvidia:
     order: 4
     base_url: https://integrate.api.nvidia.com/v1
-    key_env: NVIDIA_API_KEY
+    key_env: NVIDIA_API_KEY   # NIM_API_KEY is read too
+    timeout_s: 240            # large models on the free endpoints are slow on long replies
     allowed_for: [user_traffic, lab_jobs]
     account: {rpm: 40}
     # Judge candidates (larger open models than Groq hosts). NVIDIA publishes only the account
