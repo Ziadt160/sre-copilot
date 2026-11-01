@@ -211,6 +211,10 @@ class AnswerConfig(BaseModel):
     )
     max_tokens: int = Field(default=512, ge=16, le=4096)
     temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    reasoning_effort: Literal["low", "medium", "high"] | None = Field(
+        default=None,
+        description="reasoning models only (gpt-oss); hidden reasoning counts against max_tokens",
+    )
     compression: CompressionMode = "none"
     context_token_budget: int = Field(default=2500, ge=100, description="tokens of chunk text")
     prompt_version: str = "answer-v1"

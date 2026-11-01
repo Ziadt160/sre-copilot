@@ -218,7 +218,11 @@ class ChatClient:
     # -- calls --------------------------------------------------------------------------
 
     def _kwargs(
-        self, max_tokens: int, temperature: float, response_format: dict[str, str] | None
+        self,
+        max_tokens: int,
+        temperature: float,
+        response_format: dict[str, str] | None,
+        reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         kw: dict[str, Any] = {
             "model": self.spec.model,
@@ -227,6 +231,8 @@ class ChatClient:
         }
         if response_format is not None:
             kw["response_format"] = response_format
+        if reasoning_effort is not None:  # reasoning models (gpt-oss); sent only when set
+            kw["reasoning_effort"] = reasoning_effort
         return kw
 
     def _result(self, resp: Any, started: float) -> ChatResult:
@@ -248,11 +254,13 @@ class ChatClient:
         max_tokens: int = 512,
         temperature: float = 0.0,
         response_format: dict[str, str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> ChatResult:
         self.check_quota(estimate_tokens(messages, max_tokens))
         started = time.perf_counter()
         resp = self._client.chat.completions.create(
-            messages=list(messages), **self._kwargs(max_tokens, temperature, response_format)
+            messages=list(messages),
+            **self._kwargs(max_tokens, temperature, response_format, reasoning_effort),
         )
         result = self._result(resp, started)
         self._record(result)
@@ -265,24 +273,33 @@ class ChatClient:
         max_tokens: int = 512,
         temperature: float = 0.0,
         response_format: dict[str, str] | None = None,
+        reasoning_effort: str | None = None,
     ) -> ChatResult:
         self.check_quota(estimate_tokens(messages, max_tokens))
         started = time.perf_counter()
         resp = await self._aclient.chat.completions.create(
-            messages=list(messages), **self._kwargs(max_tokens, temperature, response_format)
+            messages=list(messages),
+            **self._kwargs(max_tokens, temperature, response_format, reasoning_effort),
         )
         result = self._result(resp, started)
         self._record(result)
         return result
 
     async def astream(
-        self, messages: Sequence[Message], *, max_tokens: int = 512, temperature: float = 0.0
+        self,
+        messages: Sequence[Message],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        reasoning_effort: str | None = None,
     ) -> AsyncIterator[str]:
         """Yield text deltas. Usage is estimated from the streamed text (providers differ on
         whether they report usage in a stream)."""
         self.check_quota(estimate_tokens(messages, max_tokens))
         stream = await self._aclient.chat.completions.create(
-            messages=list(messages), stream=True, **self._kwargs(max_tokens, temperature, None)
+            messages=list(messages),
+            stream=True,
+            **self._kwargs(max_tokens, temperature, None, reasoning_effort),
         )
         out: list[str] = []
         async for chunk in stream:

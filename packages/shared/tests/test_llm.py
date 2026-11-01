@@ -51,6 +51,7 @@ class FakeCompletions:
 class FakeAsyncCompletions(FakeCompletions):
     async def create(self, **kw: Any) -> Any:  # type: ignore[override]
         if kw.get("stream"):
+            self.calls.append(kw)
             return self._stream()
         return super().create(**kw)
 
@@ -77,6 +78,24 @@ def test_complete_returns_usage_and_records_it() -> None:
     assert (r.text, r.prompt_tokens, r.completion_tokens, r.total_tokens) == ("hello", 40, 10, 50)
     assert fake.calls[0]["max_tokens"] == 20 and fake.calls[0]["temperature"] == 0.0
     assert c.remaining_tokens() == 900 - 50
+
+
+async def test_reasoning_effort_is_sent_only_when_set() -> None:
+    sync, asy = FakeCompletions(), FakeAsyncCompletions()
+    c = ChatClient(
+        GROQ, limits=LIMITS, ledger=MemoryLedger(),
+        client=SimpleNamespace(chat=SimpleNamespace(completions=sync)),
+        aclient=SimpleNamespace(chat=SimpleNamespace(completions=asy)),
+    )  # fmt: skip
+    msgs = [{"role": "user", "content": "hi"}]
+    c.complete(msgs)
+    c.complete(msgs, reasoning_effort="low")
+    await c.acomplete(msgs, reasoning_effort="low")
+    _ = [d async for d in c.astream(msgs, reasoning_effort="low")]
+    # Unset, the key is absent: providers without reasoning models reject unknown params.
+    assert "reasoning_effort" not in sync.calls[0]
+    assert sync.calls[1]["reasoning_effort"] == "low"
+    assert [kw["reasoning_effort"] for kw in asy.calls] == ["low", "low"]
 
 
 def test_quota_guard_refuses_before_sending() -> None:

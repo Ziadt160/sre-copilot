@@ -8,6 +8,8 @@ One `eval_runs` row per repeat (`--repeat N` stores N). `eval_runs.summary` keys
                                           "none" when judging was skipped)
     judge_prompt_version, metric_version, answer_prompt_version
     n_items, n_answered, n_abstained, judge_failures
+    n_empty_answers, n_hit_max_tokens     answered with no text; answers whose completion
+                                          reached max_tokens (cut off, or reasoning ate it)
     faithfulness, answer_relevancy        mean over answered items the judge scored
     n_faithfulness, n_relevancy           how many items those means cover
     cited_rate                            share of answered items with >= 1 valid citation
@@ -120,6 +122,9 @@ def summarize(
         "n_answered": len(answered),
         "n_abstained": len(runs) - len(answered),
         "n_empty_answers": sum(1 for r in answered if not r.result.answer.strip()),
+        "n_hit_max_tokens": sum(
+            1 for r in runs if r.result.completion_tokens >= r.result.config.max_tokens
+        ),
         "judge_failures": judge_failures,
         **{k: int((counts or {}).get(k, 0)) for k in JUDGE_COUNTERS},
         "faithfulness": _mean(faith),

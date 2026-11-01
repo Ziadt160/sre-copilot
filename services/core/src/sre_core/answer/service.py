@@ -236,7 +236,10 @@ class Answerer:
         messages = build_messages(req.question, p.context, _groups(p))
         t_gen = time.perf_counter()
         res = await self._chat_for(p.cfg).acomplete(
-            messages, max_tokens=p.cfg.max_tokens, temperature=p.cfg.temperature
+            messages,
+            max_tokens=p.cfg.max_tokens,
+            temperature=p.cfg.temperature,
+            reasoning_effort=p.cfg.reasoning_effort,
         )
         return self._finish(
             req, p, res.text, res.model, res.prompt_tokens, res.completion_tokens, t_gen
@@ -262,7 +265,10 @@ class Answerer:
         parts: list[str] = []
         try:
             async for delta in chat.astream(
-                messages, max_tokens=p.cfg.max_tokens, temperature=p.cfg.temperature
+                messages,
+                max_tokens=p.cfg.max_tokens,
+                temperature=p.cfg.temperature,
+                reasoning_effort=p.cfg.reasoning_effort,
             ):
                 parts.append(delta)
                 yield {"event": "token", "data": {"text": delta}}

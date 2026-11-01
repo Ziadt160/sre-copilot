@@ -34,7 +34,7 @@ from sre_shared.config import load_answer_config
 from sre_shared.db import connect, create_pool
 from sre_shared.golden_io import golden_path, golden_version, load_golden
 from sre_shared.llm import ChatClient, QuotaExceeded, parse_model_spec
-from sre_shared.models import GoldenItem
+from sre_shared.models import AnswerConfig, GoldenItem
 from sre_shared.settings import get_settings
 
 app = typer.Typer(help="Answer evals: run, label, calibrate.", no_args_is_help=True)
@@ -84,6 +84,15 @@ def select_items(
     return items
 
 
+def effective_answer_config(block: AnswerConfig | None) -> AnswerConfig:
+    """config/answer.yaml with the experiment's own `answer:` keys on top. Unset keys keep the
+    yaml value, not the model default, so a default changed there reaches every experiment."""
+    base = load_answer_config()
+    if block is None:
+        return base
+    return base.model_copy(update=block.model_dump(exclude_unset=True))
+
+
 @app.command("run")
 def run_cmd(
     experiment: Annotated[str, typer.Option("--experiment", "-e", help="answer-*.yaml name.")],
@@ -109,7 +118,7 @@ def run_cmd(
         raise typer.BadParameter("--repeat must be at least 1")
     if loop not in {"local", "ci"}:
         raise typer.BadParameter("--loop must be local or ci")
-    answer_cfg = cfg.answer or load_answer_config()
+    answer_cfg = effective_answer_config(cfg.answer)
     if model:
         answer_cfg = answer_cfg.model_copy(update={"model": model})
     path = golden_path(golden)

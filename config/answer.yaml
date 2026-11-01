@@ -3,8 +3,9 @@
 model: groq:openai/gpt-oss-20b    # user traffic; lab volume runs pass --model ollama:qwen2.5:7b
 k: 5                              # chunks given to the model (K sweep 3/5/8 in Phase 2)
 relevance_floor: 0.0              # abstain below this best-chunk dense similarity (to be measured)
-max_tokens: 512
+max_tokens: 1024                  # ceiling; gpt-oss reasoning counts against it (decision 34)
 temperature: 0.0
+reasoning_effort: low             # gpt-oss only; medium emptied 2/30 answers at 512 (decision 34)
 compression: none                 # none | sentence (Phase 2 experiment)
 context_token_budget: 2500        # tokens of chunk text in the prompt
 prompt_version: answer-v1

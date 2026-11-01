@@ -62,9 +62,6 @@ async def load_stored_run(
         raise StoredRunError(f"run {run_id} is {row['status']}, not done")
     cfg = ExperimentConfig.model_validate(row["config"])
     summary = dict(row["summary"] or {})
-    answer_cfg = (cfg.answer or AnswerConfig()).model_copy(
-        update={"model": summary.get("model", (cfg.answer or AnswerConfig()).model)}
-    )
     cur = await conn.execute(
         "select item_id, details from public.eval_scores where run_id = %s"
         " and metric = 'answer_detail'",
@@ -80,6 +77,10 @@ async def load_stored_run(
         results[r["item_id"]] = AnswerResult.model_validate(stored)
     if not results:
         raise StoredRunError(f"run {run_id} has no stored answers")
+    # The config the answers were generated with (every result carries it), not the
+    # experiment block, which only holds the keys the experiment set.
+    first = next(iter(results.values())).config
+    answer_cfg = first.model_copy(update={"model": summary.get("model", first.model)})
     return cfg, answer_cfg, str(row["golden_version"]), results, summary
 
 
