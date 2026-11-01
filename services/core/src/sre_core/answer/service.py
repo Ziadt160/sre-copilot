@@ -156,6 +156,8 @@ class Answerer:
             ef_search=d.hnsw.ef_search,
             iterative_scan=d.hnsw.iterative_scan,
             corpus_version_id=corpus_version_id,
+            # Ignored by a Retriever without a reranker (e.g. the demo until Workers AI is checked).
+            rerank_candidates=d.rerank.candidates if d.rerank else None,
         )
 
     # -- pipeline -----------------------------------------------------------------------

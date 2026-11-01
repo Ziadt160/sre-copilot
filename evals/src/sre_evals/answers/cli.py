@@ -153,7 +153,10 @@ async def _run(
     await pool.open(wait=True)
     conn = await connect(dsn, autocommit=True)
     try:
-        answerer = build_answerer(Retriever(pool), config=answer_cfg)
+        from sre_core.retrieval.rerank import default_reranker
+
+        retriever = Retriever(pool, reranker=default_reranker())
+        answerer = build_answerer(retriever, config=answer_cfg)
         outcomes = await run_answers(
             cfg, chosen, answerer, conn, judge=judge, loop=loop, golden_version=gversion,
             answer_cfg=answer_cfg, repeat=repeat, concurrency=concurrency,

@@ -75,6 +75,20 @@ class RouteConfig(BaseModel):
     rrf_k: int = 60
 
 
+class RerankDefaults(BaseModel):
+    """Cross-encoder reranking of the top fused candidates (decision 33). Enabled only in the
+    environments listed: the lab runs it on the GPU server; the demo needs the Workers AI
+    parity check first (design doc, open questions)."""
+
+    model: str = "BAAI/bge-reranker-base"
+    revision: str = "2cfc18c9415c912f9d8155881c133215df768a70"
+    candidates: int = 20
+    environments: list[str] = Field(default_factory=lambda: ["lab"])
+
+    def enabled_for(self, env: str) -> bool:
+        return env in self.environments
+
+
 class RouterConfig(BaseModel):
     """Per-query-type retrieval (design doc: "the router flags exact-string questions and shifts
     weight to the keyword leg; conceptual questions lean dense")."""
@@ -96,6 +110,7 @@ class RetrievalDefaults(BaseModel):
     weights: dict[str, float] = Field(default_factory=lambda: {"dense": 1.0, "keyword": 1.0})
     hnsw: HnswConfig = Field(default_factory=HnswConfig)
     router: RouterConfig = Field(default_factory=RouterConfig)
+    rerank: RerankDefaults | None = None
 
 
 def load_retrieval_defaults(config_dir: Path | None = None) -> RetrievalDefaults:

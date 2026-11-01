@@ -132,3 +132,18 @@ async def test_non_json_body_is_unavailable() -> None:
     rr = make(lambda req: httpx.Response(200, text="<html>"))
     with pytest.raises(RerankerUnavailable):
         await rr.rerank("q", [chunk(1)])
+
+
+def test_default_reranker_follows_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Decision 33: the lab reranks; the demo and CI do not (Workers AI parity is unchecked)."""
+    from sre_core.retrieval.rerank import RemoteReranker, default_reranker
+    from sre_shared.settings import get_settings
+
+    for env, expected in (("lab", True), ("demo", False), ("ci", False)):
+        monkeypatch.setenv("SRE_ENV", env)
+        get_settings.cache_clear()
+        got = default_reranker()
+        assert isinstance(got, RemoteReranker) is expected, env
+        if got is not None:
+            assert got.revision == "2cfc18c9415c912f9d8155881c133215df768a70"
+    get_settings.cache_clear()

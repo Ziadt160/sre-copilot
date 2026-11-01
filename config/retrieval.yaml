@@ -25,3 +25,8 @@ router:                           # used when a request sets route_by_query_type
   default:                        # everything else: dense only (decision 29)
     use_dense: true
     use_keyword: false
+rerank:                           # decision 33: cross-encoder on the top fused candidates
+  model: BAAI/bge-reranker-base
+  revision: 2cfc18c9415c912f9d8155881c133215df768a70
+  candidates: 20                  # 50 measured no better (Phase 2)
+  environments: [lab]             # demo waits for the Workers AI parity check (design doc)

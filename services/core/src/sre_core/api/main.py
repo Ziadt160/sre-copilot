@@ -16,6 +16,7 @@ from sre_core.answer import Answerer, build_answerer
 from sre_core.answer.service import ConfigError, error_event
 from sre_core.api.auth import claims_from_authorization
 from sre_core.retrieval import NoActiveCorpusError, Retriever
+from sre_core.retrieval.rerank import default_reranker
 from sre_shared.config import load_retrieval_defaults
 from sre_shared.db import create_pool
 from sre_shared.llm import QuotaExceeded
@@ -76,7 +77,7 @@ def create_app(
         read_pool = create_pool(replica_url, timeout=2.0) if replica_url else None
         if read_pool is not None:
             await read_pool.open()  # failures fall back to the primary per request
-        app.state.retriever = Retriever(pool, read_pool=read_pool)
+        app.state.retriever = Retriever(pool, read_pool=read_pool, reranker=default_reranker())
         app.state.answerer = build_answerer(app.state.retriever)
         try:
             yield

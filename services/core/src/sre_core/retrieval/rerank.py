@@ -12,8 +12,18 @@ from collections.abc import Sequence
 import httpx
 
 from sre_core.retrieval.base import RerankerUnavailable
+from sre_shared.config import load_retrieval_defaults
 from sre_shared.models import RetrievedChunk
 from sre_shared.settings import get_settings
+
+
+def default_reranker() -> RemoteReranker | None:
+    """The reranker `config/retrieval.yaml` enables for this environment, or None."""
+    rerank = load_retrieval_defaults().rerank
+    if rerank is None or not rerank.enabled_for(get_settings().sre_env):
+        return None
+    return RemoteReranker(rerank.model, revision=rerank.revision)
+
 
 DEFAULT_MODEL = "BAAI/bge-reranker-base"
 MAX_LENGTH = 512
