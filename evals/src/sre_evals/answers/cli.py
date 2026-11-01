@@ -159,7 +159,7 @@ async def _run(
         answerer = build_answerer(retriever, config=answer_cfg)
         outcomes = await run_answers(
             cfg, chosen, answerer, conn, judge=judge, loop=loop, golden_version=gversion,
-            answer_cfg=answer_cfg, repeat=repeat, concurrency=concurrency,
+            answer_cfg=answer_cfg, repeat=repeat, concurrency=concurrency, use_cache=True,
         )  # fmt: skip
         for o in outcomes:
             s = o.summary

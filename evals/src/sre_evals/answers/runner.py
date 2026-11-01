@@ -33,12 +33,14 @@ import asyncio
 import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 from psycopg import AsyncConnection
 
 from sre_core.answer.base import AnswererLike
+from sre_evals.answers.cache import AnswerCache, cache_key
 from sre_evals.answers.judge import (
     JUDGE_PROMPT_VERSION,
     Judge,
@@ -209,6 +211,32 @@ def _score_rows(run_id: int, r: ItemRun) -> list[list[Any]]:
     return rows
 
 
+# Transient provider errors get a few patient retries on top of the SDK's quick ones, so a
+# short outage does not fail a run that has already spent most of a day's tokens.
+RETRY_DELAYS_S = (10.0, 30.0, 60.0)
+
+
+def _transient(exc: BaseException) -> bool:
+    import openai
+
+    return isinstance(
+        exc, openai.APIConnectionError | openai.APITimeoutError | openai.RateLimitError
+    )
+
+
+async def _answer_with_retries(
+    answerer: AnswererLike, req: AnswerRequest, claims: Claims, delays: Sequence[float]
+) -> AnswerResult:
+    for attempt in range(len(delays) + 1):
+        try:
+            return await answerer.answer(req, claims)
+        except Exception as e:
+            if attempt == len(delays) or not _transient(e):
+                raise
+            await asyncio.sleep(delays[attempt])
+    raise AssertionError("unreachable")
+
+
 async def _one(
     item: GoldenItem,
     cfg: ExperimentConfig,
@@ -217,6 +245,8 @@ async def _one(
     judge: Judge | None,
     claims: Claims,
     corpus_version_id: int | None,
+    cache: AnswerCache | None = None,
+    retry_delays: Sequence[float] = RETRY_DELAYS_S,
 ) -> ItemRun:
     req = AnswerRequest(
         question=item.question,
@@ -224,7 +254,11 @@ async def _one(
         config=answer_cfg,
         corpus_version_id=corpus_version_id,
     )
-    result = await answerer.answer(req, claims)
+    result = cache.get(item.id, item.question) if cache is not None else None
+    if result is None:
+        result = await _answer_with_retries(answerer, req, claims, retry_delays)
+        if cache is not None:
+            cache.put(item.id, result)
     run = ItemRun(item, result, score_answer(result, item))
     if judge is not None and not result.abstained and result.answer.strip():
         contexts = [chunk_text(c) for c in result.context]
@@ -248,6 +282,9 @@ async def run_answers(
     claims: Claims = ANONYMOUS,
     extra: Mapping[str, Any] | None = None,
     max_judge_failure_share: float = MAX_JUDGE_FAILURE_SHARE,
+    use_cache: bool = False,
+    cache_directory: Path | None = None,
+    retry_delays: Sequence[float] = RETRY_DELAYS_S,
 ) -> list[AnswerRunOutcome]:
     """Answer and score every item `repeat` times; one stored `kind='answer'` run per repeat.
     An answerer, judge-transport or quota error stores a `failed` run (no scores) and re-raises;
@@ -282,11 +319,20 @@ async def run_answers(
         before = {k: int(getattr(judge, k, 0)) for k in JUDGE_COUNTERS}
         before_total = int(getattr(judge, "failures", 0))
 
-        async def guarded(item: GoldenItem) -> ItemRun:
+        cache = (
+            AnswerCache(cache_key(stamps.config_hash, rep, golden_version), cache_directory)
+            if use_cache
+            else None
+        )
+        if cache is not None:
+            meta["cached_answers_at_start"] = len(cache)
+
+        async def guarded(item: GoldenItem, cache: AnswerCache | None = cache) -> ItemRun:
             async with sem:
                 return await _one(
-                    item, cfg, acfg, answerer, judge, claims, cfg.resolved_corpus_version_id
-                )
+                    item, cfg, acfg, answerer, judge, claims, cfg.resolved_corpus_version_id,
+                    cache, retry_delays,
+                )  # fmt: skip
 
         try:
             runs = list(await asyncio.gather(*(guarded(i) for i in items)))
