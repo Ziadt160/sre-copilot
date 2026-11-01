@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 
 import numpy as np
@@ -9,10 +9,12 @@ import pytest
 
 from sre_ingest import snapshot, store
 from sre_ingest.chunker import CHUNKER_VERSION
+from sre_ingest.chunking_config import load_chunking
 from sre_ingest.pipeline import RunResult, run_ingest
 from sre_ingest.report import build_report
 from sre_ingest.testsite import make_site
 from sre_shared.config import CorpusConfig, CorpusSource
+from sre_shared.embed.base import Vectors
 from sre_shared.embed.fake import FakeEmbedder
 from sre_shared.testing.plugin import DATA_TABLES
 
@@ -249,3 +251,134 @@ def test_snapshot_export_keeps_only_selected_models(
     assert all(v is not None and len(v) == 384 for v in gte)
     info = json.loads(pq.read_schema(out).metadata[b"sre_snapshot"])
     assert info["embedding_models"] == ["gte-small"]
+
+
+# --- chunking variants as non-active corpus versions ---------------------------------------
+
+
+class RecordingEmbedder(FakeEmbedder):
+    def __init__(self) -> None:
+        super().__init__("gte-small")
+        self.texts: list[str] = []
+
+    def embed_documents(self, texts: Sequence[str], batch_size: int = 32) -> Vectors:
+        self.texts.extend(texts)
+        return super().embed_documents(texts, batch_size)
+
+
+def add_long_page(tmp_path: Path) -> None:
+    body = "\n\n".join(" ".join(f"para{j}word{i}" for i in range(80)) for j in range(14))
+    page = tmp_path / "sources" / "1.36" / "content/en/docs/concepts/long-page.md"
+    page.write_text(f"---\ntitle: Long page\ncontent_type: concept\n---\n\n## Body\n\n{body}\n")
+
+
+def variant_ingest(
+    cfg: CorpusConfig,
+    dsn: str,
+    tmp_path: Path,
+    name: str,
+    emb: FakeEmbedder | None = None,
+    **kw: object,
+) -> RunResult:
+    emb = emb or FakeEmbedder("gte-small")
+    return run_ingest(
+        cfg,
+        dsn=dsn,
+        do_fetch=False,
+        data_dir=tmp_path,
+        embedders={"gte-small": emb},
+        token_counter=FakeEmbedder("gte-small"),
+        chunking=load_chunking(name),
+        log=lambda _m: None,
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+def default_rows(conn: store.Conn, cv: int) -> list[dict[str, object]]:
+    return conn.execute(
+        "select id, chunk_key, body, header, char_start, char_end, token_count,"
+        " emb_gte_small::text as v from public.chunks where corpus_version_id=%s order by id",
+        [cv],
+    ).fetchall()
+
+
+def test_variants_are_separate_ready_versions_and_leave_the_default_alone(
+    dsn: str, cfg: CorpusConfig, tmp_path: Path
+) -> None:
+    add_long_page(tmp_path)
+    base = ingest(cfg, dsn, tmp_path, activate=True)
+    with store.open_conn(dsn) as conn:
+        before = default_rows(conn, base.corpus_version_id)
+    assert before
+
+    ids: dict[str, int] = {}
+    for name in ("t256", "o64", "nohdr"):
+        res = variant_ingest(cfg, dsn, tmp_path, name)
+        assert res.created_version and res.corpus_version_id != base.corpus_version_id
+        ids[name] = res.corpus_version_id
+
+    with store.open_conn(dsn) as conn:
+        rows = conn.execute(
+            "select id, label, chunker_version, status from public.corpus_versions order by id"
+        ).fetchall()
+        got = {r["id"]: (r["label"], r["chunker_version"], r["status"]) for r in rows}
+        n = {
+            name: conn.execute(
+                "select count(*) as n, max(token_count) as mx from public.chunks"
+                " where corpus_version_id=%s",
+                [cv],
+            ).fetchone()
+            for name, cv in ids.items()
+        }
+        assert default_rows(conn, base.corpus_version_id) == before
+    assert got[base.corpus_version_id] == ("k8s-1.36-chunker1", "1", "active")
+    assert got[ids["t256"]] == ("k8s-1.36-chunker1-t256", "1-t256", "ready")
+    assert got[ids["o64"]] == ("k8s-1.36-chunker1-o64", "1-o64", "ready")
+    assert got[ids["nohdr"]] == ("k8s-1.36-chunker1-nohdr", "1-nohdr", "ready")
+    assert n["t256"] is not None and n["t256"]["mx"] <= 256
+    assert n["t256"]["n"] > len(before)
+    assert n["nohdr"] is not None and n["nohdr"]["n"] == len(before)
+
+
+def test_variant_ingested_twice_adds_nothing(dsn: str, cfg: CorpusConfig, tmp_path: Path) -> None:
+    add_long_page(tmp_path)
+    ingest(cfg, dsn, tmp_path, activate=True)
+    first = variant_ingest(cfg, dsn, tmp_path, "o64")
+    second = variant_ingest(cfg, dsn, tmp_path, "o64")
+    assert second.corpus_version_id == first.corpus_version_id and not second.created_version
+    assert second.chunks_inserted == 0 and second.documents_inserted == 0
+    assert second.chunks_total == first.chunks_total > 0
+    with store.open_conn(dsn) as conn:
+        assert conn.execute("select count(*) as n from public.corpus_versions").fetchone() == {
+            "n": 2
+        }
+        st = conn.execute(
+            "select status from public.corpus_versions where id=%s", [first.corpus_version_id]
+        ).fetchone()
+    assert st == {"status": "ready"}
+
+
+def test_nohdr_embeds_the_body_only(dsn: str, cfg: CorpusConfig, tmp_path: Path) -> None:
+    default_emb, nohdr_emb = RecordingEmbedder(), RecordingEmbedder()
+    base = variant_ingest(cfg, dsn, tmp_path, "default", default_emb)
+    hdr = variant_ingest(cfg, dsn, tmp_path, "nohdr", nohdr_emb)
+    assert default_emb.texts and all(t.startswith("Kubernetes v1.36 | ") for t in default_emb.texts)
+    assert nohdr_emb.texts and not any("Kubernetes v1.36 | " in t for t in nohdr_emb.texts)
+    with store.open_conn(dsn) as conn:
+        bodies = {
+            r["body"]
+            for r in conn.execute(
+                "select body from public.chunks where corpus_version_id=%s", [hdr.corpus_version_id]
+            ).fetchall()
+        }
+        header_kept = conn.execute(
+            "select count(*) as n from public.chunks where corpus_version_id=%s and header <> ''",
+            [hdr.corpus_version_id],
+        ).fetchone()
+        stats = store.version_stats(conn, hdr.corpus_version_id)
+    assert set(nohdr_emb.texts) == bodies
+    assert header_kept == {"n": hdr.chunks_total}
+    assert stats["chunking"]["header_in_embedding"] is False
+    # Different text, different cache key: nothing is served from the default version's vectors.
+    assert hdr.stats["embedding"]["gte-small"]["cache_hits"] == 0
+    assert base.stats["embedding"]["gte-small"]["embedded"] == base.chunks_total

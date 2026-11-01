@@ -9,6 +9,10 @@ Algorithm
 4. Merge forward only, inside one document: a chunk whose body is tiny is joined with the next
    chunk (keeping the first section's path) when the result fits and neither side is a split
    piece. Bodies are always `parsed_text[char_start:char_end]`.
+5. Optional overlap (`overlap_tokens` > 0, a chunking experiment): each chunk after the first of
+   a section starts at an earlier word boundary inside the previous chunk, so the two share about
+   `overlap_tokens` tokens; the token budget still holds. With 0 the output is exactly that of
+   chunker version 1.
 """
 
 from __future__ import annotations
@@ -46,6 +50,8 @@ class _Piece:
     path: list[str]
     anchor: str | None
     split: bool = False
+    sec: int = 0
+    """Index of the heading section the piece came from (overlap never crosses sections)."""
 
 
 def make_header(version: str, title: str, section_path: list[str]) -> str:
@@ -111,13 +117,18 @@ def chunk_document(
     count_tokens: TokenCounter,
     max_tokens: int = MAX_TOKENS,
     min_body_tokens: int = MIN_BODY_TOKENS,
+    overlap_tokens: int = 0,
 ) -> tuple[list[ChunkRecord], ChunkStats]:
     text = doc.parsed_text
     lines = scan_lines(text)
+    # With overlap, chunks are packed leaving room for the shared text, so it is not squeezed
+    # out by full chunks; the overlap step then checks the real `max_tokens`.
+    pack_tokens = max_tokens - overlap_tokens if overlap_tokens else max_tokens
+    pack_tokens = max(pack_tokens, max_tokens // 2)
     stats = ChunkStats()
     pieces: list[_Piece] = []
 
-    for path, anchor, s0, e0 in _sections(text, lines):
+    for sec, (path, anchor, s0, e0) in enumerate(_sections(text, lines)):
         region = text[s0:e0]
         if not region.strip():
             continue
@@ -126,16 +137,16 @@ def chunk_document(
         header = make_header(doc.k8s_version, doc.title, path)
 
         def fits(a: int, b: int, header: str = header) -> bool:
-            return count_tokens(f"{header}\n\n{text[a:b]}") <= max_tokens
+            return count_tokens(f"{header}\n\n{text[a:b]}") <= pack_tokens
 
         cur: tuple[int, int] | None = None
         for bs, be, is_code in _blocks(text, lines, s, e):
             if not fits(bs, be):
                 if cur:
-                    pieces.append(_Piece(*cur, path, anchor))
+                    pieces.append(_Piece(*cur, path, anchor, sec=sec))
                     cur = None
                 for ps, pe in _split_span(text, bs, be, fits, by_lines=is_code):
-                    pieces.append(_Piece(ps, pe, path, anchor, split=True))
+                    pieces.append(_Piece(ps, pe, path, anchor, split=True, sec=sec))
                 if is_code:
                     stats.code_block_splits += 1
                 else:
@@ -145,12 +156,14 @@ def chunk_document(
                 cur = (cur[0], be)
             else:
                 if cur:
-                    pieces.append(_Piece(*cur, path, anchor))
+                    pieces.append(_Piece(*cur, path, anchor, sec=sec))
                 cur = (bs, be)
         if cur:
-            pieces.append(_Piece(*cur, path, anchor))
+            pieces.append(_Piece(*cur, path, anchor, sec=sec))
 
-    pieces = _merge_forward(doc, text, pieces, count_tokens, max_tokens, min_body_tokens, stats)
+    pieces = _merge_forward(doc, text, pieces, count_tokens, pack_tokens, min_body_tokens, stats)
+    if overlap_tokens > 0:
+        pieces = _add_overlap(doc, text, pieces, count_tokens, max_tokens, overlap_tokens)
 
     chunks: list[ChunkRecord] = []
     seen: dict[str, int] = {}
@@ -209,11 +222,50 @@ def _merge_forward(
             header = make_header(doc.k8s_version, doc.title, cur.path)
             if count_tokens(f"{header}\n\n{text[cur.start : nxt.end]}") > max_tokens:
                 break
-            cur = _Piece(cur.start, nxt.end, cur.path, cur.anchor)
+            cur = _Piece(cur.start, nxt.end, cur.path, cur.anchor, sec=cur.sec)
             stats.merged += 1
             i += 1
         out.append(cur)
         i += 1
+    return out
+
+
+def _add_overlap(
+    doc: DocumentRecord,
+    text: str,
+    pieces: list[_Piece],
+    count_tokens: TokenCounter,
+    max_tokens: int,
+    overlap_tokens: int,
+) -> list[_Piece]:
+    """Move each chunk's start back into the previous chunk of the same section, to the earliest
+    word start where the shared text is at most `overlap_tokens` and header + body still fit
+    `max_tokens`. The body stays the contiguous `text[start:end]`, so spans remain true."""
+    out: list[_Piece] = []
+    for i, p in enumerate(pieces):
+        prev = pieces[i - 1] if i else None
+        if prev is None or prev.sec != p.sec or prev.end > p.start:
+            out.append(p)
+            continue
+        header = make_header(doc.k8s_version, doc.title, p.path)
+        # Word starts of the previous chunk, ascending; an earlier start means more overlap.
+        starts = [prev.start + m.start() for m in re.finditer(r"\S+", text[prev.start : prev.end])]
+
+        def ok(s: int, header: str = header, prev: _Piece = prev, p: _Piece = p) -> bool:
+            return (
+                count_tokens(text[s : prev.end]) <= overlap_tokens
+                and count_tokens(f"{header}\n\n{text[s : p.end]}") <= max_tokens
+            )
+
+        # ok() is monotone in s (a later start has fewer tokens): find the earliest passing start.
+        lo, hi, best = 0, len(starts) - 1, None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            if ok(starts[mid]):
+                best, hi = starts[mid], mid - 1
+            else:
+                lo = mid + 1
+        out.append(p if best is None else _Piece(best, p.end, p.path, p.anchor, p.split, p.sec))
     return out
 
 

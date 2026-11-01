@@ -12,6 +12,7 @@ from typing import Any
 
 from sre_ingest import sources, store
 from sre_ingest.chunker import CHUNKER_VERSION, ChunkStats, chunk_document
+from sre_ingest.chunking_config import ChunkingConfig
 from sre_ingest.embedding import EmbedStats, embed_pending
 from sre_ingest.parser import ParseContext, ParseStats, parse_document
 from sre_shared.config import CorpusConfig, CorpusSource
@@ -47,8 +48,8 @@ def sample_stride(paths: list[str], limit: int | None) -> list[str]:
     return [paths[(i * len(paths)) // limit] for i in range(limit)]
 
 
-def version_label(sources_: Sequence[CorpusSource]) -> str:
-    return "k8s-" + "+".join(s.k8s_version for s in sources_) + f"-chunker{CHUNKER_VERSION}"
+def version_label(sources_: Sequence[CorpusSource], chunker_version: str = CHUNKER_VERSION) -> str:
+    return "k8s-" + "+".join(s.k8s_version for s in sources_) + f"-chunker{chunker_version}"
 
 
 class Timer:
@@ -90,12 +91,14 @@ def run_ingest(
     models: Sequence[EmbeddingModelName] = ("gte-small",),
     limit_docs: int | None = None,
     activate: bool = False,
+    chunking: ChunkingConfig | None = None,
     do_fetch: bool = True,
     data_dir: Path | None = None,
     embedders: Mapping[EmbeddingModelName, Embedder] | None = None,
     token_counter: Embedder | None = None,
     log: Log = print,
 ) -> RunResult:
+    chunking = chunking or ChunkingConfig()
     selected = [s for s in cfg.versions if versions is None or s.k8s_version in versions]
     if not selected:
         raise ValueError(f"no pinned versions match {versions}; run `sre-ingest pin` first")
@@ -113,7 +116,7 @@ def run_ingest(
     split_counts = {"code_blocks": 0, "prose": 0}
     with store.open_conn(dsn) as conn:
         cv, created = store.get_or_create_version(
-            conn, version_label(selected), selected, CHUNKER_VERSION
+            conn, version_label(selected, chunking.version), selected, chunking.version
         )
         result = RunResult(cv, created, skipped_models=skipped)
         for src in selected:
@@ -133,7 +136,12 @@ def run_ingest(
                 if doc is None:
                     continue
                 with timer.stage("chunk"):
-                    chunks, cstats = chunk_document(doc, counter.count_tokens)
+                    chunks, cstats = chunk_document(
+                        doc,
+                        counter.count_tokens,
+                        max_tokens=chunking.max_tokens,
+                        overlap_tokens=chunking.overlap_tokens,
+                    )
                 with timer.stage("upsert"):
                     doc_id, new_doc = store.upsert_document(conn, cv, doc)
                     result.chunks_inserted += store.upsert_chunks(conn, cv, doc_id, chunks)
@@ -148,7 +156,9 @@ def run_ingest(
         embed_stats: dict[str, EmbedStats] = {}
         for name, emb in embedders.items():
             with timer.stage(f"embed_{name}"):
-                embed_stats[name] = embed_pending(conn, cv, name, emb)
+                embed_stats[name] = embed_pending(
+                    conn, cv, name, emb, header_in_embedding=chunking.header_in_embedding
+                )
             log(f"embedded {name}: {embed_stats[name].as_dict()}")
 
         row = conn.execute(
@@ -161,6 +171,7 @@ def run_ingest(
             else []
         )
         result.stats = {
+            "chunking": chunking.model_dump(),
             "oversized_splits": split_counts,
             "merged_chunks": chunk_totals.merged,
             "shortcodes": {
