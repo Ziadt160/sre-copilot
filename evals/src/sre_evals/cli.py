@@ -51,7 +51,12 @@ def retrieval(
     ann_sample: Annotated[int, typer.Option(help="Items sampled for ANN recall.")] = ANN_SAMPLE,
     gate: Annotated[bool, typer.Option("--gate", help="Fail on a drop vs the baseline.")] = False,
     baseline: Annotated[Path, typer.Option(help="Baseline file for --gate.")] = DEFAULT_BASELINE,
-    concurrency: Annotated[int, typer.Option(help="Concurrent retrievals.")] = 4,
+    concurrency: Annotated[
+        int,
+        typer.Option(
+            help="Concurrent retrievals; above 1 runs faster but latency then includes queueing."
+        ),
+    ] = 1,
     database_url: DbOption = None,
 ) -> None:
     """Run experiment configs through the Retriever and store scores."""
@@ -102,8 +107,11 @@ async def _run_all(
 ) -> bool:
     from sre_core.retrieval.service import Retriever
 
-    pool = create_pool(dsn)
-    await pool.open()
+    # Open every connection before timing: a connect inside a timed query (the lab's port
+    # forward drops some) showed up as multi-second latency outliers.
+    size = max(2, concurrency)
+    pool = create_pool(dsn, min_size=size, max_size=size)
+    await pool.open(wait=True)
     conn = await connect(dsn, autocommit=True)
     failed = False
     try:

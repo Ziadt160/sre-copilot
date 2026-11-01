@@ -72,6 +72,9 @@ def _mean(values: Sequence[float]) -> float:
     return float(np.mean(values)) if values else 0.0
 
 
+WARMUP_QUERIES = 3
+
+
 def latency_stats(latencies: Sequence[float]) -> dict[str, float]:
     if not latencies:
         return {"p50": 0.0, "p95": 0.0, "mean": 0.0}
@@ -228,7 +231,7 @@ async def run_experiment(
     *,
     loop: str,
     golden_version: str,
-    concurrency: int = 4,
+    concurrency: int = 1,
     ann: bool = False,
     ann_sample: int = ANN_SAMPLE,
     ann_ef_values: Sequence[int] = ANN_EF_VALUES,
@@ -246,6 +249,10 @@ async def run_experiment(
         golden_version=golden_version,
     )
     try:
+        # Untimed warm-up: loads the query embedder, fills the pool and the database caches,
+        # so latency covers steady-state queries only.
+        for item in scorable[:WARMUP_QUERIES]:
+            await retriever.retrieve(cfg.request_for(item.question, item.filters), claims)
         runs = await _retrieve_all(cfg, scorable, retriever, claims, concurrency)
         ann_by_item: dict[str, dict[int, float]] = {}
         if ann and cfg.uses_dense and scorable:

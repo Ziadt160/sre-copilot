@@ -6,6 +6,7 @@ import pytest
 
 from sre_evals.runner import load_experiments, run_experiment
 from sre_evals.runner.config import ExperimentConfig
+from sre_evals.runner.engine import WARMUP_QUERIES
 from sre_evals.runner.testing import SRC, VER, FakeRetriever, W, chunk
 from sre_shared.models import GoldenItem, GoldPassage, RetrievalFilters, RetrievalRequest
 from sre_shared.testing.seed import create_corpus_version
@@ -54,8 +55,10 @@ async def test_run_writes_run_and_scores(db: Any) -> None:
     assert s["ndcg@5"] == pytest.approx(0.75)
     # The unanswerable item has no gold: not retrieved, not scored.
     assert (s["n_items"], s["n_scored"], s["n_skipped_no_gold"]) == (3, 2, 1)
-    assert len(fake.calls) == 2
-    # Latency 10 and 30 ms: p50 = 20, p95 = 10 + 0.95 * 20 = 29.
+    # Untimed warm-up queries come first; the unanswerable item is never queried.
+    assert len(fake.calls) == 2 + min(WARMUP_QUERIES, 2)
+    assert all(req.query != "question unans-0001" for req, _ in fake.calls)
+    # Latency 10 and 30 ms (warm-up excluded): p50 = 20, p95 = 10 + 0.95 * 20 = 29.
     assert s["latency_ms"]["p50"] == pytest.approx(20.0)
     assert s["latency_ms"]["p95"] == pytest.approx(29.0)
     assert s["empty_result_rate"] == 0.0
