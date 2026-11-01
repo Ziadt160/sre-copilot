@@ -128,7 +128,7 @@ def stratified_sample(items: Sequence[LabelItem], n: int, seed: int) -> list[Lab
             for s in strata:
                 alloc[s] = max(alloc[s], 1)
         while sum(alloc.values()) > n:  # the floor of 1 can overshoot: trim the largest
-            big = max(strata, key=lambda s: (alloc[s] - quota[s], alloc[s]))
+            big = max((s for s in strata if alloc[s] > 1), key=lambda s: (alloc[s] - quota[s], s))
             alloc[big] -= 1
         for s in sorted(strata, key=lambda s: (-(quota[s] - alloc[s]), s)):
             if sum(alloc.values()) >= n:
