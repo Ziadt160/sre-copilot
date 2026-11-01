@@ -34,10 +34,14 @@ import torch
 from sentence_transformers import SentenceTransformer
 
 _models: dict[tuple[str, str], SentenceTransformer] = {}
-_gpu_lock = threading.Lock()  # one batch on the GPU at a time
+# One model load or batch at a time. transformers flips torch's global default dtype while it
+# loads, so a load overlapping another load or a batch left a model with mixed half/float
+# weights ("mat1 and mat2 must have the same dtype"), found when 4 eval workers hit a cold server.
+_gpu_lock = threading.Lock()
 
 
 def _model(hf_id: str, revision: str, max_seq_length: int) -> SentenceTransformer:
+    """Load once per (model, revision). Call with `_gpu_lock` held."""
     key = (hf_id, revision)
     model = _models.get(key)
     if model is None:
@@ -63,10 +67,10 @@ def _token_counts(model: SentenceTransformer, texts: list[str]) -> list[int]:
 
 def _embed(req: dict[str, Any]) -> dict[str, Any]:
     texts: list[str] = req["texts"]
-    model = _model(req["hf_id"], req["revision"], int(req["max_seq_length"]))
     if req.get("kind") == "query":
         texts = [req.get("query_prefix", "") + t for t in texts]
     with _gpu_lock:
+        model = _model(req["hf_id"], req["revision"], int(req["max_seq_length"]))
         counts = _token_counts(model, texts) if texts else []
         vecs = model.encode(
             texts,
@@ -90,8 +94,9 @@ def _embed(req: dict[str, Any]) -> dict[str, Any]:
 
 
 def _count(req: dict[str, Any]) -> dict[str, Any]:
-    model = _model(req["hf_id"], req["revision"], int(req.get("max_seq_length", 512)))
-    return {"counts": _token_counts(model, req["texts"])}
+    with _gpu_lock:
+        model = _model(req["hf_id"], req["revision"], int(req.get("max_seq_length", 512)))
+        return {"counts": _token_counts(model, req["texts"])}
 
 
 class Handler(BaseHTTPRequestHandler):
