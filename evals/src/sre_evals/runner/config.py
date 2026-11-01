@@ -56,6 +56,9 @@ class RerankConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     model: str = "BAAI/bge-reranker-base"
+    # Pinned: the GPU server loads from the local cache only, where this snapshot is the one
+    # downloaded (2026-11-02); "main" does not resolve offline.
+    revision: str = "2cfc18c9415c912f9d8155881c133215df768a70"
     candidates: int = Field(default=20, ge=1, le=200, description="fused candidates reranked")
 
 

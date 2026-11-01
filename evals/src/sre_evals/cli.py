@@ -172,9 +172,12 @@ def retriever_for(pool: Any, cfg: Any, cache: dict[str | None, Any]) -> Any:
     from sre_core.retrieval.rerank import RemoteReranker
     from sre_core.retrieval.service import Retriever
 
-    key = cfg.rerank.model if cfg.rerank else None
+    key = f"{cfg.rerank.model}@{cfg.rerank.revision}" if cfg.rerank else None
     if key not in cache:
-        cache[key] = Retriever(pool, reranker=RemoteReranker(key) if key else None)
+        reranker = (
+            RemoteReranker(cfg.rerank.model, revision=cfg.rerank.revision) if cfg.rerank else None
+        )
+        cache[key] = Retriever(pool, reranker=reranker)
     return cache[key]
 
 
