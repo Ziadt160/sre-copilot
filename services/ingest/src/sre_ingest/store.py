@@ -43,19 +43,24 @@ def sources_json(sources: Sequence[CorpusSource]) -> str:
 def get_or_create_version(
     conn: Conn, label: str, sources: Sequence[CorpusSource], chunker_version: str
 ) -> tuple[int, bool]:
-    """Reuse a building or ready version only when label, sources (SHAs) and chunker_version all
-    match; otherwise create one. Returns (id, created). A reused ready version goes back to
-    building until the run marks it ready again."""
+    """Reuse a version only when label, sources (SHAs) and chunker_version all match; otherwise
+    create one. Returns (id, created). A reused ready version goes back to building until the
+    run marks it ready again. A matching active version is reused in place and stays active:
+    same SHAs and chunker mean the same content (a changed document raises ContentChanged), so
+    an identical re-run inserts nothing and only fills embedding columns that are still empty."""
     blob = sources_json(sources)
     row = conn.execute(
-        "select id from public.corpus_versions where status in ('building','ready')"
-        " and label = %s and chunker_version = %s and sources = %s::jsonb order by id desc limit 1",
+        "select id, status from public.corpus_versions"
+        " where status in ('building','ready','active')"
+        " and label = %s and chunker_version = %s and sources = %s::jsonb"
+        " order by (status = 'active') desc, id desc limit 1",
         [label, chunker_version, blob],
     ).fetchone()
     if row is not None:
         cv = int(row["id"])
-        conn.execute("update public.corpus_versions set status='building' where id=%s", [cv])
-        conn.commit()
+        if row["status"] != "active":
+            conn.execute("update public.corpus_versions set status='building' where id=%s", [cv])
+            conn.commit()
         return cv, False
     row = conn.execute(
         "insert into public.corpus_versions (label, sources, chunker_version)"
@@ -166,21 +171,27 @@ def set_embeddings(
 def mark_ready(
     conn: Conn, cv: int, models: Sequence[str], stats: dict[str, Any], sources: str | None = None
 ) -> None:
+    """building -> ready with the run's stats; an active version keeps its status."""
     conn.execute(
-        "update public.corpus_versions set status='ready', embedding_models=%s, stats=%s::jsonb"
-        " where id=%s and status in ('building','ready')",
+        "update public.corpus_versions set embedding_models=%s, stats=%s::jsonb,"
+        " status = case when status = 'active' then 'active' else 'ready' end"
+        " where id=%s and status in ('building','ready','active')",
         [list(models), json.dumps(stats, default=str), cv],
     )
     conn.commit()
 
 
 def activate(conn: Conn, cv: int) -> None:
-    """ready -> active; the previous active version becomes retired, in one transaction."""
+    """ready -> active; the previous active version becomes retired, in one transaction.
+    Activating the active version is a no-op."""
     row = conn.execute(
         "select status from public.corpus_versions where id=%s for update", [cv]
     ).fetchone()
     if row is None:
         raise LookupError(f"corpus version {cv} does not exist")
+    if row["status"] == "active":
+        conn.commit()
+        return
     if row["status"] != "ready":
         raise ValueError(f"corpus version {cv} is {row['status']}; only 'ready' can be activated")
     conn.execute(

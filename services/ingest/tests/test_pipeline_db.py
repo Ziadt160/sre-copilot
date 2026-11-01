@@ -91,6 +91,20 @@ def test_idempotent_rerun_adds_nothing(dsn: str, cfg: CorpusConfig, tmp_path: Pa
     assert rep["tokens"]["max"] > 0
 
 
+def test_rerun_against_the_active_version_reuses_it(
+    dsn: str, cfg: CorpusConfig, tmp_path: Path
+) -> None:
+    """Found in the lab: an identical re-run after --activate built a second full copy."""
+    first = ingest(cfg, dsn, tmp_path, activate=True)
+    second = ingest(cfg, dsn, tmp_path, activate=True)
+    assert second.corpus_version_id == first.corpus_version_id
+    assert not second.created_version
+    assert second.chunks_inserted == 0 and second.documents_inserted == 0
+    with store.open_conn(dsn) as conn:
+        rows = conn.execute("select id, status from public.corpus_versions").fetchall()
+    assert [(r["id"], r["status"]) for r in rows] == [(first.corpus_version_id, "active")]
+
+
 def test_embedding_cache_is_used_across_versions(
     dsn: str, cfg: CorpusConfig, tmp_path: Path
 ) -> None:
@@ -139,11 +153,13 @@ def test_activate_prune_state_machine(dsn: str, cfg: CorpusConfig, tmp_path: Pat
 
     with store.open_conn(dsn) as conn:
         assert statuses(conn) == {a: "active", b: "ready"}
+        store.activate(conn, a)  # already active: a no-op
+        assert statuses(conn) == {a: "active", b: "ready"}
+        store.activate(conn, b)
+        assert statuses(conn) == {a: "retired", b: "active"}
         with pytest.raises(ValueError, match="only 'ready'"):
             store.activate(conn, a)
         conn.rollback()
-        store.activate(conn, b)
-        assert statuses(conn) == {a: "retired", b: "active"}
         assert store.resolve_version(conn, "active") == b
         assert store.prune(conn) == 1
         assert statuses(conn) == {b: "active"}

@@ -55,6 +55,12 @@ def make_terminal() -> Terminal:
 @app.callback()
 def main() -> None:
     """Build, review and validate the golden set."""
+    # DeepEval prints emoji; a redirected stdout on Windows defaults to cp1252 and would crash.
+    for stream in (sys.stdout, sys.stderr):
+        if (getattr(stream, "encoding", "") or "").lower() not in ("utf-8", "utf8"):
+            reconfigure = getattr(stream, "reconfigure", None)
+            if reconfigure is not None:
+                reconfigure(encoding="utf-8", errors="replace")
 
 
 @app.command()
@@ -109,11 +115,14 @@ def synthesize(
         raise typer.Exit(2) from e
     console.print(f"{len(rows)} contexts, ~{est} tokens planned on {spec.label}")
     llm = make_llm(model)
-    items = []
-    for stratum in sorted({r.stratum for r in rows}):
-        group = [r for r in rows if r.stratum == stratum]
-        res = _run(
-            a_synthesize(
+
+    async def go() -> list[tuple[str, int, Any]]:
+        # One event loop for every stratum: the async HTTP client's connections belong to the
+        # loop that opened them, so a second asyncio.run() leaves it talking to a closed loop.
+        done: list[tuple[str, int, Any]] = []
+        for stratum in sorted({r.stratum for r in rows}):
+            group = [r for r in rows if r.stratum == stratum]
+            res = await a_synthesize(
                 group,
                 llm,
                 evolutions=evolutions,
@@ -121,10 +130,14 @@ def synthesize(
                 id_start=id_start,
                 max_concurrent=max_concurrent,
             )
-        )
+            done.append((stratum, len(group), res))
+        return done
+
+    items = []
+    for stratum, n_group, res in _run(go()):
         items.extend(res.items)
         console.print(
-            f"{stratum}: {len(res.items)} kept of {len(group)}; "
+            f"{stratum}: {len(res.items)} kept of {n_group}; "
             f"filter rejected {res.filter_rejected[stratum]}; "
             f"exact-string repaired {res.exact_repaired}, rejected {res.exact_rejected}; "
             f"{res.llm_calls} model calls"
