@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+from collections.abc import Iterator
+from pathlib import Path
+
+import numpy as np
+import psycopg
+import pytest
+
+from sre_ingest import snapshot, store
+from sre_ingest.chunker import CHUNKER_VERSION
+from sre_ingest.pipeline import RunResult, run_ingest
+from sre_ingest.report import build_report
+from sre_ingest.testsite import make_site
+from sre_shared.config import CorpusConfig, CorpusSource
+from sre_shared.embed.fake import FakeEmbedder
+from sre_shared.testing.plugin import DATA_TABLES
+
+pytestmark = pytest.mark.integration
+
+SRC = CorpusSource(
+    k8s_version="1.36",
+    branch="release-1.36",
+    commit_sha="1" * 40,
+    url_base="https://v1-36.docs.kubernetes.io",
+)
+
+
+@pytest.fixture
+def dsn(pg_dsn: str) -> Iterator[str]:
+    def wipe() -> None:
+        with psycopg.connect(pg_dsn, autocommit=True) as c:
+            c.execute(
+                "truncate "
+                + ", ".join(f"public.{t}" for t in DATA_TABLES)
+                + " restart identity cascade"
+            )
+
+    wipe()
+    yield pg_dsn
+    wipe()
+
+
+@pytest.fixture
+def cfg(tmp_path: Path) -> CorpusConfig:
+    make_site(tmp_path / "sources" / "1.36")
+    return CorpusConfig(
+        repo="https://example.test/website.git",
+        license="CC-BY-4.0",
+        attribution="test",
+        versions=[SRC],
+    )
+
+
+def ingest(cfg: CorpusConfig, dsn: str, tmp_path: Path, **kw: object) -> RunResult:
+    fake = FakeEmbedder("gte-small")
+    return run_ingest(
+        cfg,
+        dsn=dsn,
+        do_fetch=False,
+        data_dir=tmp_path,
+        embedders={"gte-small": fake},
+        token_counter=fake,
+        log=lambda _m: None,
+        **kw,  # type: ignore[arg-type]
+    )
+
+
+def test_idempotent_rerun_adds_nothing(dsn: str, cfg: CorpusConfig, tmp_path: Path) -> None:
+    first = ingest(cfg, dsn, tmp_path)
+    assert first.created_version
+    assert first.documents_seen == 4  # draft and empty glossary page skipped
+    assert first.chunks_inserted > 0
+    second = ingest(cfg, dsn, tmp_path)
+    assert second.corpus_version_id == first.corpus_version_id
+    assert not second.created_version
+    assert second.chunks_inserted == 0
+    assert second.documents_inserted == 0
+    assert second.chunks_total == first.chunks_total
+    with store.open_conn(dsn) as conn:
+        row = conn.execute(
+            "select count(*) filter (where emb_gte_small is null) as nulls, count(*) as n"
+            " from public.chunks"
+        ).fetchone()
+        assert row is not None and row["nulls"] == 0 and row["n"] == first.chunks_total
+        rep = build_report(conn, first.corpus_version_id)
+    assert rep["unknown_shortcodes"] == {"widget": 1, "gizmo": 1}
+    assert rep["status"] == "ready"
+    assert rep["embedding_models"] == ["gte-small"]
+    assert rep["embedding"]["gte-small"]["embedded"] == 0
+    assert rep["tokens"]["max"] > 0
+
+
+def test_embedding_cache_is_used_across_versions(
+    dsn: str, cfg: CorpusConfig, tmp_path: Path
+) -> None:
+    ingest(cfg, dsn, tmp_path)
+    cfg.versions = [SRC.model_copy(update={"commit_sha": "2" * 40})]
+    second = ingest(cfg, dsn, tmp_path)
+    assert second.created_version
+    assert second.stats["embedding"]["gte-small"]["cache_hits"] == second.chunks_total
+
+
+def test_version_reuse_requires_label_sources_and_chunker(dsn: str) -> None:
+    with store.open_conn(dsn) as conn:
+        a, created = store.get_or_create_version(conn, "L", [SRC], "1")
+        assert created
+        assert store.get_or_create_version(conn, "L", [SRC], "1") == (a, False)
+        other_sha = SRC.model_copy(update={"commit_sha": "3" * 40})
+        assert store.get_or_create_version(conn, "L", [other_sha], "1")[0] != a
+        assert store.get_or_create_version(conn, "L", [SRC], "2")[0] != a
+        assert store.get_or_create_version(conn, "L2", [SRC], "1")[0] != a
+
+
+def test_changed_document_inside_a_version_fails_loudly(
+    dsn: str, cfg: CorpusConfig, tmp_path: Path
+) -> None:
+    first = ingest(cfg, dsn, tmp_path)
+    page = tmp_path / "sources" / "1.36" / "content/en/docs/reference/glossary-index.md"
+    page.write_text("---\ntitle: Glossary index\n---\nDifferent text now.\n", encoding="utf-8")
+    with pytest.raises(store.ContentChanged):
+        ingest(cfg, dsn, tmp_path)
+    with store.open_conn(dsn) as conn:
+        assert (
+            store.get_or_create_version(conn, "x", [SRC], CHUNKER_VERSION)[0]
+            > first.corpus_version_id
+        )
+
+
+def test_activate_prune_state_machine(dsn: str, cfg: CorpusConfig, tmp_path: Path) -> None:
+    a = ingest(cfg, dsn, tmp_path, activate=True).corpus_version_id
+    cfg.versions = [SRC.model_copy(update={"commit_sha": "4" * 40})]
+    b = ingest(cfg, dsn, tmp_path).corpus_version_id
+    assert a != b
+
+    def statuses(conn: store.Conn) -> dict[int, str]:
+        rows = conn.execute("select id, status from public.corpus_versions").fetchall()
+        return {int(r["id"]): r["status"] for r in rows}
+
+    with store.open_conn(dsn) as conn:
+        assert statuses(conn) == {a: "active", b: "ready"}
+        with pytest.raises(ValueError, match="only 'ready'"):
+            store.activate(conn, a)
+        conn.rollback()
+        store.activate(conn, b)
+        assert statuses(conn) == {a: "retired", b: "active"}
+        assert store.resolve_version(conn, "active") == b
+        assert store.prune(conn) == 1
+        assert statuses(conn) == {b: "active"}
+        assert conn.execute(
+            "select count(*) as n from public.chunks where corpus_version_id=%s", [a]
+        ).fetchone() == {"n": 0}
+        with pytest.raises(LookupError):
+            store.activate(conn, 9999)
+
+
+def test_snapshot_round_trip_into_fresh_database(
+    dsn: str, pg_admin_dsn: str, cfg: CorpusConfig, tmp_path: Path
+) -> None:
+    from sre_shared.testing.pg import session_database
+
+    cv = ingest(cfg, dsn, tmp_path).corpus_version_id
+    out = tmp_path / "snap.parquet"
+    with store.open_conn(dsn) as conn:
+        counts = snapshot.export_snapshot(conn, cv, out)
+        src_rows = conn.execute(
+            "select chunk_key, ordinal, source_path, section_path, header, body, char_start,"
+            " char_end, token_count, emb_gte_small::text as v from public.chunks order by chunk_key"
+        ).fetchall()
+        src_docs = conn.execute(
+            "select source_path, content_hash, parsed_text from public.documents order by source_path"
+        ).fetchall()
+    assert counts["chunks"] == len(src_rows) > 0
+
+    with session_database(pg_admin_dsn) as fresh, store.open_conn(fresh) as conn:
+        new_cv, loaded = snapshot.load_snapshot(conn, out, activate=True)
+        assert loaded == counts
+        got = conn.execute(
+            "select chunk_key, ordinal, source_path, section_path, header, body, char_start,"
+            " char_end, token_count, emb_gte_small::text as v from public.chunks order by chunk_key"
+        ).fetchall()
+        got_docs = conn.execute(
+            "select source_path, content_hash, parsed_text from public.documents order by source_path"
+        ).fetchall()
+        status = conn.execute(
+            "select status, embedding_models from public.corpus_versions where id=%s", [new_cv]
+        ).fetchone()
+    assert got == src_rows
+    assert got_docs == src_docs
+    assert status == {"status": "active", "embedding_models": ["gte-small"]}
+    assert np.isfinite([float(x) for x in got[0]["v"].strip("[]").split(",")]).all()

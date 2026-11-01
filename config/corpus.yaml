@@ -5,5 +5,17 @@ repo: https://github.com/kubernetes/website
 docs_root: content/en/docs
 language: en
 license: CC-BY-4.0
-attribution: "Kubernetes Documentation, (c) The Kubernetes Authors, CC BY 4.0, https://kubernetes.io/docs/"
-versions: []
+attribution: Kubernetes Documentation, (c) The Kubernetes Authors, CC BY 4.0, https://kubernetes.io/docs/
+versions:
+- k8s_version: '1.37'
+  branch: main
+  commit_sha: 8b4c8846bebeb1355b8105c7ba3379fdd09374c9
+  url_base: https://kubernetes.io
+- k8s_version: '1.36'
+  branch: release-1.36
+  commit_sha: 1de955ebabe7e17da1ebb4f582635491227f4157
+  url_base: https://v1-36.docs.kubernetes.io
+- k8s_version: '1.35'
+  branch: release-1.35
+  commit_sha: 8817d358864b70a9710c5ad34f78df6a239be33d
+  url_base: https://v1-35.docs.kubernetes.io
