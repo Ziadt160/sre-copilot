@@ -1,6 +1,9 @@
 # Lab services that run beside the Supabase local stack (npx supabase start).
 # Phase 1 needs only the shared test Postgres; Redis, the streaming replica, Toxiproxy,
 # Prometheus and Grafana arrive in later phases. Ollama runs natively on Windows for the GPU.
+# WARNING: never run `docker compose ... --profile replica down -v`: the profile shares this
+# project with `testdb`, and `down -v` deletes testdb's volume too. Remove only the replica
+# services and their volumes (infra/load/README.md has the exact commands).
 name: sre-lab
 
 services:

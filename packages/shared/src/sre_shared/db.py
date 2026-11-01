@@ -84,14 +84,21 @@ def connect_sync(
 
 
 def create_pool(
-    dsn: str | None = None, *, min_size: int | None = None, max_size: int | None = None
+    dsn: str | None = None,
+    *,
+    min_size: int | None = None,
+    max_size: int | None = None,
+    timeout: float = 30.0,
 ) -> AsyncConnectionPool:
-    """An unopened pool; call `await pool.open()` at startup (FastAPI lifespan)."""
+    """An unopened pool; call `await pool.open()` at startup (FastAPI lifespan). `timeout` is
+    how long a request waits for a connection before `PoolTimeout`; a pool with a fallback
+    (the lab replica) should give up quickly."""
     settings = get_settings()
     return AsyncConnectionPool(
         dsn or settings.database_url,
         min_size=min_size or settings.db_pool_min,
         max_size=max_size or settings.db_pool_max,
+        timeout=timeout,
         # The pool retries failed connects itself; the timeout keeps a swallowed one from
         # hanging a worker (seen with the lab's Docker port forward).
         kwargs={
