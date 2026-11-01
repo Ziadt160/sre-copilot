@@ -18,7 +18,10 @@ PUBLIC_DOC = FixtureDoc(
     source_path="content/en/docs/concepts/workloads/pods/_index.md",
     k8s_version="1.34",
     title="Pods",
-    sections=[((), "Pods are the smallest deployable units of computing."), (("Lifecycle",), "A Pod restarts containers that exit with CrashLoopBackOff.")],
+    sections=[
+        ((), "Pods are the smallest deployable units of computing."),
+        (("Lifecycle",), "A Pod restarts containers that exit with CrashLoopBackOff."),
+    ],
 )
 TEAM_A_DOC = FixtureDoc(
     source_path="internal/runbooks/payments.md",
@@ -31,7 +34,9 @@ TEAM_A_DOC = FixtureDoc(
 
 async def _seed(db: Any) -> int:
     cv = await create_corpus_version(db)
-    await insert_docs(db, [PUBLIC_DOC, TEAM_A_DOC], corpus_version_id=cv, embedders=[FakeEmbedder()])
+    await insert_docs(
+        db, [PUBLIC_DOC, TEAM_A_DOC], corpus_version_id=cv, embedders=[FakeEmbedder()]
+    )
     return cv
 
 
@@ -102,7 +107,9 @@ async def test_halfvec_round_trip_and_active_version(db: Any) -> None:
     text = "Kubernetes v1.34 | Pods\n\nPods are the smallest deployable units of computing."
     expected = FakeEmbedder().embed_documents([text])[0]
     row = await (
-        await db.execute("select emb_gte_small from public.chunks where ordinal = 0 and title = 'Pods'")
+        await db.execute(
+            "select emb_gte_small from public.chunks where ordinal = 0 and title = 'Pods'"
+        )
     ).fetchone()
     stored = row["emb_gte_small"]
     assert isinstance(stored, HalfVector)

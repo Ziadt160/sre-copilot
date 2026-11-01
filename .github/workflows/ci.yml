@@ -19,6 +19,15 @@ env:
   HF_HOME: ${{ github.workspace }}/.cache/huggingface
 
 jobs:
+  actionlint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Lint workflow files
+        uses: docker://rhysd/actionlint:1.7.7
+        with:
+          args: -color
+
   lint:
     runs-on: ubuntu-24.04
     steps:
@@ -145,16 +154,17 @@ jobs:
         if: steps.ready.outputs.run == 'true'
         uses: actions/cache@v4.2.0
         with:
-          path: data/snapshot
+          path: data/snapshot/corpus.parquet
           key: corpus-${{ hashFiles('config/corpus.yaml') }}-${{ hashFiles('services/ingest/src/**') }}-gte-small
       - name: Load corpus snapshot
         if: steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit == 'true'
-        run: uv run sre-ingest snapshot load data/snapshot
+        run: uv run sre-ingest snapshot load --in data/snapshot/corpus.parquet --activate
       - name: Build corpus (cache miss)
         if: steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit != 'true'
         run: |
-          uv run sre-ingest run --models gte-small
-          uv run sre-ingest snapshot save data/snapshot
+          uv run sre-ingest run --models gte-small --activate
+          mkdir -p data/snapshot
+          uv run sre-ingest snapshot export --corpus-version active --out data/snapshot/corpus.parquet
       - name: Retrieval gate
         if: steps.ready.outputs.run == 'true'
         run: uv run sre-eval retrieval --experiment hybrid-gte-small --loop ci --gate

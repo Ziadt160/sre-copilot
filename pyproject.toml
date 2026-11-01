@@ -66,6 +66,7 @@ python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
 mypy_path = ["packages/shared/src", "services/core/src", "services/ingest/src", "evals/src"]
+files = ["packages/shared/src", "services/core/src", "services/ingest/src", "evals/src"]
 explicit_package_bases = true
 exclude = ["/tests/", "^\\.orchestra/"]
 
