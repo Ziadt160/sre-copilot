@@ -40,7 +40,13 @@ async def build_reports(
         corpus_ids = [r["corpus_version_id"] for r in runs if r["corpus_version_id"] is not None]
         storage = await storage_stats(conn, max(corpus_ids)) if corpus_ids else {}
         sweeps = await latest_sweep_runs(conn)
-        await asyncio.to_thread(_write_details, details, render_details(runs, storage, sweeps))
+        # Imported here: sre_evals.answers.report itself imports sre_evals.report.details.
+        from sre_evals.answers.report import fetch_answer_data, render_answer_sections
+
+        answers = render_answer_sections(await fetch_answer_data(conn))
+        await asyncio.to_thread(
+            _write_details, details, render_details(runs, storage, sweeps, answers)
+        )
     return runs
 
 
