@@ -25,7 +25,7 @@ def golden(iid: str, stratum: str, quote: str | None) -> GoldenItem:
     gold = [GoldPassage(source_path=SRC, k8s_version=VER, quote=quote)] if quote else []
     return GoldenItem(
         id=iid,
-        stratum=stratum,  # type: ignore[arg-type]
+        stratum=stratum,
         question=f"question {iid}",
         gold_passages=gold,
         status="accepted",
