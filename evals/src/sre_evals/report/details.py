@@ -25,6 +25,48 @@ async def latest_runs(conn: AsyncConnection[Any]) -> list[dict[str, Any]]:
     return [dict(r) for r in await cur.fetchall()]
 
 
+async def latest_sweep_runs(conn: AsyncConnection[Any]) -> list[dict[str, Any]]:
+    """Latest `done` run per sweep point (kinds `sweep` and `hnsw`), oldest first, each with
+    `folds`: recall@5 and MRR@10 on the two fixed halves of the golden set."""
+    cur = await conn.execute(
+        f"select * from (select distinct on (experiment) kind, {RUN_COLUMNS}"
+        " from public.eval_runs where kind in ('sweep', 'hnsw') and status = 'done'"
+        " order by experiment, started_at desc, id desc) latest order by id"
+    )
+    runs = [dict(r) for r in await cur.fetchall()]
+    for r in runs:
+        cur = await conn.execute(
+            "select item_id, metric, value from public.eval_scores where run_id = %s"
+            " and ((metric = 'recall' and k = 5) or (metric = 'mrr' and k = 10))",
+            [r["id"]],
+        )
+        per_item: dict[str, dict[str, float]] = {}
+        for row in await cur.fetchall():
+            per_item.setdefault(row["item_id"], {})[row["metric"]] = float(row["value"])
+        r["folds"] = fold_means(per_item)
+    return runs
+
+
+def fold_of(item_ids: Sequence[str]) -> dict[str, str]:
+    """Two fixed halves: items alternate A/B in id order within each stratum (the id prefix,
+    `fac` or `exs`), so each half keeps the stratum mix and the split never depends on scores."""
+    groups: dict[str, list[str]] = {}
+    for iid in sorted(item_ids):
+        groups.setdefault(iid.split("-", 1)[0], []).append(iid)
+    return {iid: "AB"[i % 2] for ids in groups.values() for i, iid in enumerate(ids)}
+
+
+def fold_means(per_item: dict[str, dict[str, float]]) -> dict[str, dict[str, float]]:
+    """Mean recall and MRR per fold, from {item_id: {"recall": x, "mrr": y}}."""
+    folds = fold_of(list(per_item))
+    out: dict[str, dict[str, float]] = {}
+    for fold in "AB":
+        rows = [v for iid, v in per_item.items() if folds[iid] == fold]
+        if rows:
+            out[fold] = {m: sum(r.get(m, 0.0) for r in rows) / len(rows) for m in ("recall", "mrr")}
+    return out
+
+
 async def storage_stats(
     conn: AsyncConnection[Any], corpus_version_id: int | None
 ) -> dict[str, dict[str, Any]]:
@@ -79,8 +121,82 @@ def _table(header: Sequence[str], rows: Sequence[Sequence[str]]) -> list[str]:
     return out
 
 
+def _params(p: dict[str, Any]) -> str:
+    return ", ".join(f"{k}={v:g}" if isinstance(v, float) else f"{k}={v}" for k, v in p.items())
+
+
+def _fold(r: dict[str, Any], metric: str) -> str:
+    f = r.get("folds") or {}
+    if "A" not in f or "B" not in f:
+        return "-"
+    return f"{f['A'][metric]:.3f} / {f['B'][metric]:.3f}"
+
+
+def _hnsw_key(r: dict[str, Any]) -> tuple[int, int, int]:
+    p = r["summary"]["params"]
+    return (int(p["m"]), int(p["ef_construction"]), int(p["ef_search"]))
+
+
+def render_sweeps(sweeps: Sequence[dict[str, Any]]) -> list[str]:
+    """Sections for parameter sweeps (kind `sweep`) and HNSW build sweeps (kind `hnsw`)."""
+    if not sweeps:
+        return []
+    lines = [
+        "",
+        "## Sweeps",
+        "",
+        "Each sweep point is scored on the same items it is chosen on, so the best point "
+        "looks better than it would on new questions. Folds A / B are two fixed halves of "
+        "the golden set (items alternate within each stratum): a point that wins on both "
+        "halves is more than noise.",
+    ]
+    by_sweep: dict[str, list[dict[str, Any]]] = {}
+    for r in sweeps:
+        by_sweep.setdefault(str(r["summary"].get("sweep", r["experiment"])), []).append(r)
+    for name, runs in by_sweep.items():
+        kind = runs[0]["kind"]
+        lines += ["", f"### {name} ({kind})", ""]
+        rows: list[list[str]] = []
+        if kind == "hnsw":
+            for r in sorted(runs, key=_hnsw_key):
+                s, h = r["summary"], r["summary"].get("hnsw", {})
+                m, efc, ef = _hnsw_key(r)
+                ann = s.get("ann_recall") or {}
+                rows.append([
+                    str(m), str(efc), f"{h.get('build_seconds', 0):.1f}",
+                    f"{h.get('index_mb', 0):.1f}", str(ef),
+                    _f(next(iter(ann.values()))) if ann else "-",
+                    _f(s["recall@5"]), _f(s["mrr@10"]), _fold(r, "recall"),
+                    f"{s['latency_ms']['p50']:.0f}", f"{s['latency_ms']['p95']:.0f}",
+                ])  # fmt: skip
+            header = [
+                "m", "ef_construction", "build s", "index MB", "ef_search", "ANN recall@10",
+                "recall@5", "MRR@10", "recall@5 A / B", "p50 ms", "p95 ms",
+            ]  # fmt: skip
+        else:
+            for r in runs:
+                s = r["summary"]
+                ann = s.get("ann_recall") or {}
+                rows.append([
+                    _params(s.get("params", {})), _f(s["recall@5"]), _f(s["mrr@10"]),
+                    _f(s["ndcg@10"]), _fold(r, "recall"), _fold(r, "mrr"),
+                    _f(next(iter(ann.values()))) if ann else "-",
+                    f"{s['latency_ms']['p95']:.0f}",
+                ])  # fmt: skip
+            header = [
+                "parameters", "recall@5", "MRR@10", "nDCG@10", "recall@5 A / B",
+                "MRR@10 A / B", "ANN recall@10", "p95 ms",
+            ]  # fmt: skip
+        lines += _table(header, rows)
+        base = str(runs[0]["experiment"]).split("[", 1)[0]
+        lines += ["", f"Base experiment: `{base}`. Golden version: `{runs[0]['golden_version']}`."]
+    return lines
+
+
 def render_details(
-    runs: Sequence[dict[str, Any]], storage: dict[str, dict[str, Any]] | None = None
+    runs: Sequence[dict[str, Any]],
+    storage: dict[str, dict[str, Any]] | None = None,
+    sweeps: Sequence[dict[str, Any]] = (),
 ) -> str:
     """Markdown for docs/results.md. Deterministic for the same inputs (no timestamps)."""
     runs = sorted(runs, key=lambda r: r["experiment"])
@@ -245,4 +361,5 @@ def render_details(
         ]
     else:
         lines.append("_No dense experiments yet._")
+    lines += render_sweeps(sweeps)
     return "\n".join(lines) + "\n"

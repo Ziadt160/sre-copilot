@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Protocol
 
@@ -187,13 +187,15 @@ async def _insert_run(
     stamps: VersionStamps,
     status: str,
     summary: dict[str, Any],
+    kind: str = "retrieval",
 ) -> int:
     row = await (
         await conn.execute(
             "insert into public.eval_runs (kind, loop, experiment, config, stamps, golden_version,"
             " corpus_version_id, status, summary, finished_at)"
-            " values ('retrieval', %s, %s, %s, %s, %s, %s, %s, %s, now()) returning id",
+            " values (%s, %s, %s, %s, %s, %s, %s, %s, %s, now()) returning id",
             [
+                kind,
                 loop,
                 cfg.name,
                 Jsonb(cfg.model_dump(mode="json")),
@@ -236,9 +238,13 @@ async def run_experiment(
     ann_sample: int = ANN_SAMPLE,
     ann_ef_values: Sequence[int] = ANN_EF_VALUES,
     claims: Claims = ANONYMOUS,
+    kind: str = "retrieval",
+    extra: Mapping[str, Any] | None = None,
 ) -> RunOutcome:
     """Run `cfg` on every item that has gold passages and store the run.
 
+    `kind` other than "retrieval" (a sweep point) keeps the run out of the README table;
+    `extra` is merged into the stored summary (sweep name, parameters, index build facts).
     A retrieval error stores a `failed` run (no scores) and re-raises.
     """
     scorable = [i for i in items if i.gold_passages]
@@ -263,11 +269,12 @@ async def run_experiment(
         stamps.corpus_version_id = None
         await _insert_run(
             conn, cfg, loop, golden_version, stamps, "failed",
-            {"error": f"{type(e).__name__}: {e}"},
+            {"error": f"{type(e).__name__}: {e}", **(extra or {})}, kind,
         )  # fmt: skip
         raise
 
     summary = summarize(runs, cfg, len(items))
+    summary.update(extra or {})
     if ann_by_item:
         efs = sorted({ef for v in ann_by_item.values() for ef in v})
         summary["ann_recall"] = {
@@ -280,7 +287,7 @@ async def run_experiment(
     stamps.chunker_version = await _chunker_version(conn, stamps.corpus_version_id)
 
     async with conn.transaction():
-        run_id = await _insert_run(conn, cfg, loop, golden_version, stamps, "done", summary)
+        run_id = await _insert_run(conn, cfg, loop, golden_version, stamps, "done", summary, kind)
         rows: list[list[Any]] = []
         for r in runs:
             iid = r.item.id

@@ -8,7 +8,13 @@ from typing import Any
 
 from psycopg import AsyncConnection
 
-from sre_evals.report.details import latest_runs, render_details, storage_stats
+from sre_evals.report.details import (
+    latest_runs,
+    latest_sweep_runs,
+    render_details,
+    render_sweeps,
+    storage_stats,
+)
 from sre_evals.report.readme import END, START, render_block, replace_block
 
 
@@ -33,7 +39,8 @@ async def build_reports(
     if details is not None:
         corpus_ids = [r["corpus_version_id"] for r in runs if r["corpus_version_id"] is not None]
         storage = await storage_stats(conn, max(corpus_ids)) if corpus_ids else {}
-        await asyncio.to_thread(_write_details, details, render_details(runs, storage))
+        sweeps = await latest_sweep_runs(conn)
+        await asyncio.to_thread(_write_details, details, render_details(runs, storage, sweeps))
     return runs
 
 
@@ -42,8 +49,10 @@ __all__ = [
     "START",
     "build_reports",
     "latest_runs",
+    "latest_sweep_runs",
     "render_block",
     "render_details",
+    "render_sweeps",
     "replace_block",
     "storage_stats",
 ]

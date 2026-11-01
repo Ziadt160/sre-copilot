@@ -1,4 +1,4 @@
-"""`sre-eval` command line: retrieval runs, results report, baseline."""
+"""`sre-eval` command line: retrieval runs, parameter sweeps, results report, baseline."""
 
 from __future__ import annotations
 
@@ -19,9 +19,20 @@ from sre_evals.runner import (
 )
 from sre_evals.runner.engine import ANN_SAMPLE
 from sre_evals.runner.gate import DEFAULT_BASELINE
+from sre_evals.runner.sweep import (
+    HNSW_DEFAULT,
+    SWEEP_PARAMS,
+    build_hnsw,
+    check_hnsw_params,
+    derive,
+    grid_points,
+    parse_grid,
+    point_name,
+)
 from sre_shared.aio import run
 from sre_shared.db import connect, create_pool
 from sre_shared.golden_io import golden_path, golden_version, load_golden
+from sre_shared.models import EmbeddingModelName, GoldenItem
 from sre_shared.settings import REPO_ROOT, get_settings
 
 app = typer.Typer(help="Run evals and build results reports.", no_args_is_help=True)
@@ -142,6 +153,155 @@ async def _run_all(
         await conn.close()
         await pool.close()
     return failed
+
+
+def _scorable(golden: str) -> tuple[list[GoldenItem], list[GoldenItem], str]:
+    path = golden_path(golden)
+    items = load_golden(path, accepted_only=True) if path.exists() else []
+    scorable = [i for i in items if i.gold_passages]
+    if not scorable:
+        raise typer.BadParameter(f"golden set {golden!r} has no accepted items with gold passages")
+    return items, scorable, golden_version(path)
+
+
+def _ints(text: str, what: str) -> list[int]:
+    try:
+        values = [int(v) for v in text.split(",") if v.strip()]
+    except ValueError as e:
+        raise typer.BadParameter(f"{what}: {e}") from e
+    if not values:
+        raise typer.BadParameter(f"{what}: no values")
+    return values
+
+
+@app.command("sweep")
+def sweep(
+    base: Annotated[str, typer.Option(help="Experiment to vary, e.g. hybrid-gte-small.")],
+    grid: Annotated[
+        list[str],
+        typer.Option("--grid", help=f"NAME=v1,v2 (repeatable); NAME in {sorted(SWEEP_PARAMS)}"),
+    ],
+    name: Annotated[str | None, typer.Option(help="Sweep name stored with each point.")] = None,
+    golden: Annotated[str, typer.Option(help="Golden set directory under evals/golden.")] = "v1",
+    ann_recall: Annotated[
+        bool, typer.Option("--ann-recall", help="ANN recall at each point's ef_search, all items.")
+    ] = False,
+    database_url: DbOption = None,
+) -> None:
+    """Run every point of a parameter grid over one experiment (stored as kind `sweep`)."""
+    configs = load_experiments()
+    if base not in configs:
+        raise typer.BadParameter(f"unknown experiment {base!r}; have {sorted(configs)}")
+    try:
+        points = grid_points(parse_grid(grid))
+    except ValueError as e:
+        raise typer.BadParameter(str(e)) from e
+    items, scorable, gversion = _scorable(golden)
+    sweep_name = name or base
+    dsn = database_url or get_settings().database_url
+
+    async def go() -> None:
+        from sre_core.retrieval.service import Retriever
+
+        pool = create_pool(dsn, min_size=2, max_size=2)
+        await pool.open(wait=True)
+        conn = await connect(dsn, autocommit=True)
+        try:
+            retriever = Retriever(pool)
+            for params in points:
+                cfg = derive(configs[base], params)
+                outcome = await run_experiment(
+                    cfg, items, retriever, conn, loop="local", golden_version=gversion,
+                    ann=ann_recall, ann_sample=len(scorable), ann_ef_values=[cfg.ef_search],
+                    kind="sweep", extra={"sweep": sweep_name, "params": params},
+                )  # fmt: skip
+                _print_point(cfg.name, outcome.run_id, outcome.summary)
+        finally:
+            await conn.close()
+            await pool.close()
+
+    run(go())
+
+
+@app.command("hnsw")
+def hnsw(
+    model: Annotated[
+        str, typer.Option(help="Embedding model whose index is rebuilt.")
+    ] = "gte-small",
+    m: Annotated[str, typer.Option("--m", help="Comma-separated m values.")] = "8,16,32",
+    ef_construction: Annotated[str, typer.Option(help="Comma-separated values.")] = "32,64,128,256",
+    ef_search: Annotated[str, typer.Option(help="Comma-separated values.")] = "20,40,100,200",
+    golden: Annotated[str, typer.Option(help="Golden set directory under evals/golden.")] = "v1",
+    database_url: DbOption = None,
+) -> None:
+    """Rebuild the model's HNSW index for each (m, ef_construction), measure quality, ANN recall
+    and latency at each ef_search (kind `hnsw`), then restore the migration's index."""
+    from sre_shared.embed.base import SPECS
+
+    if model not in SPECS:
+        raise typer.BadParameter(f"unknown model {model!r}; have {sorted(SPECS)}")
+    name: EmbeddingModelName = model
+    configs = load_experiments()
+    base = configs.get(f"dense-{model}")
+    if base is None:
+        raise typer.BadParameter(f"no experiment dense-{model} to sweep")
+    builds = []
+    for mv in _ints(m, "--m"):
+        for efc in _ints(ef_construction, "--ef-construction"):
+            try:
+                check_hnsw_params(mv, efc)
+            except ValueError as e:
+                console.print(f"skip m={mv}, ef_construction={efc}: {e}")
+                continue
+            builds.append((mv, efc))
+    efs = _ints(ef_search, "--ef-search")
+    items, scorable, gversion = _scorable(golden)
+    dsn = database_url or get_settings().database_url
+
+    async def go() -> None:
+        from sre_core.retrieval.service import Retriever
+
+        pool = create_pool(dsn, min_size=2, max_size=2)
+        await pool.open(wait=True)
+        conn = await connect(dsn, autocommit=True)
+        try:
+            retriever = Retriever(pool)
+            for mv, efc in builds:
+                info = await build_hnsw(conn, name, mv, efc)
+                console.print(
+                    f"built m={mv} ef_construction={efc}: {info['build_seconds']:.1f} s,"
+                    f" {info['index_mb']:.1f} MB"
+                )
+                for ef in efs:
+                    params = {"m": mv, "ef_construction": efc, "ef_search": ef}
+                    cfg = derive(base, {"ef_search": ef}).model_copy(
+                        update={"name": point_name(base.name, params)}
+                    )
+                    outcome = await run_experiment(
+                        cfg, items, retriever, conn, loop="local", golden_version=gversion,
+                        ann=True, ann_sample=len(scorable), ann_ef_values=[ef], kind="hnsw",
+                        extra={"sweep": f"hnsw-{model}", "params": params, "hnsw": info},
+                    )  # fmt: skip
+                    _print_point(cfg.name, outcome.run_id, outcome.summary)
+        finally:
+            restored = await build_hnsw(conn, name, *HNSW_DEFAULT)
+            console.print(
+                f"restored the migration's index (m={HNSW_DEFAULT[0]},"
+                f" ef_construction={HNSW_DEFAULT[1]}) in {restored['build_seconds']:.1f} s"
+            )
+            await conn.close()
+            await pool.close()
+
+    run(go())
+
+
+def _print_point(label: str, run_id: int, s: dict[str, Any]) -> None:
+    ann = s.get("ann_recall") or {}
+    ann_txt = "  ann " + "/".join(f"{v:.3f}" for v in ann.values()) if ann else ""
+    console.print(
+        f"{label}: run {run_id}  recall@5 {s['recall@5']:.3f}  MRR@10 {s['mrr@10']:.3f}  "
+        f"p50 {s['latency_ms']['p50']:.0f} ms  p95 {s['latency_ms']['p95']:.0f} ms{ann_txt}"
+    )
 
 
 @app.command("report")

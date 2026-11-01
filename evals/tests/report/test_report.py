@@ -133,3 +133,49 @@ async def test_storage_stats_reads_the_ingest_embedding_seconds(
     out = await storage_stats(db, vid)
     assert out["gte-small"]["vectors"] == 1
     assert out["gte-small"]["ingest_seconds"] == 12.5
+
+
+def test_fold_split_alternates_within_each_stratum() -> None:
+    from sre_evals.report.details import fold_means, fold_of
+
+    ids = ["fac-0003", "exs-0001", "fac-0001", "exs-0002", "fac-0002", "exs-0003"]
+    assert fold_of(ids) == {
+        "exs-0001": "A", "exs-0002": "B", "exs-0003": "A",
+        "fac-0001": "A", "fac-0002": "B", "fac-0003": "A",
+    }  # fmt: skip
+    means = fold_means(
+        {i: {"recall": 1.0 if fold_of(ids)[i] == "A" else 0.0, "mrr": 0.5} for i in ids}
+    )
+    assert means == {"A": {"recall": 1.0, "mrr": 0.5}, "B": {"recall": 0.0, "mrr": 0.5}}
+
+
+def test_render_sweeps_tables() -> None:
+    from sre_evals.report.details import render_sweeps
+
+    summary = {
+        "recall@5": 0.8,
+        "mrr@10": 0.6,
+        "ndcg@10": 0.7,
+        "latency_ms": {"p50": 9.0, "p95": 12.0},
+    }
+    fusion = {
+        "kind": "sweep", "experiment": "hybrid-gte-small[w_keyword=0.5]", "golden_version": "v1-x",
+        "summary": {**summary, "sweep": "fusion", "params": {"w_keyword": 0.5}},
+        "folds": {"A": {"recall": 0.9, "mrr": 0.7}, "B": {"recall": 0.7, "mrr": 0.5}},
+    }  # fmt: skip
+    hnsw = {
+        "kind": "hnsw", "experiment": "dense-gte-small[m=8,ef_construction=32,ef_search=40]",
+        "golden_version": "v1-x", "folds": {},
+        "summary": {
+            **summary, "sweep": "hnsw-gte-small", "ann_recall": {"40": 0.95},
+            "params": {"m": 8, "ef_construction": 32, "ef_search": 40},
+            "hnsw": {"build_seconds": 3.25, "index_mb": 41.0},
+        },
+    }  # fmt: skip
+    text = "\n".join(render_sweeps([fusion, hnsw]))
+    assert "### fusion (sweep)" in text and "### hnsw-gte-small (hnsw)" in text
+    assert (
+        "| w_keyword=0.5 | 0.800 | 0.600 | 0.700 | 0.900 / 0.700 | 0.700 / 0.500 | - | 12 |" in text
+    )
+    assert "| 8 | 32 | 3.2 | 41.0 | 40 | 0.950 | 0.800 | 0.600 | - | 9 | 12 |" in text
+    assert render_sweeps([]) == []
