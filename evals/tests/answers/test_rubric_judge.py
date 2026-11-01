@@ -18,6 +18,7 @@ from sre_evals.answers.rubric_judge import (
     RubricReply,
     build_messages,
     parse_check,
+    passage_of,
     score_reply,
 )
 from sre_evals.answers.stats import score_to_label
@@ -56,7 +57,9 @@ class FakeClient:
         if kw.get("response_format") is None:  # pass 2: one claim and its quote
             prompt = messages[0]["content"]
             self.check_calls.append(prompt)
-            claim = prompt.split("\n", 1)[0].removeprefix("Claim: ")
+            claim = next(
+                ln.removeprefix("Claim: ") for ln in prompt.splitlines() if ln.startswith("Claim: ")
+            )
             text = self.checks.get(claim, "supported")
             return SimpleNamespace(text=text, prompt_tokens=30, completion_tokens=1)
         self.calls.append({"messages": list(messages), **kw})
@@ -198,3 +201,18 @@ def test_parse_check_reads_the_last_verdict_word() -> None:
     assert parse_check("The claim is not stated") == "not_stated"
     assert parse_check("**contradicted**") == "contradicted"
     assert parse_check("hmm") is None
+
+
+async def test_the_check_sees_the_passage_the_quote_comes_from() -> None:
+    passages = ["Unrelated text about Services and ports.",
+                "Verb is a list of kubernetes non-resource API verbs. The subject may use them."]  # fmt: skip
+    claims = [{"claim": "It lists the verbs the subject may use.", "verdict": "supported",
+               "evidence": "Verb is a list of kubernetes non-resource API verbs"}]  # fmt: skip
+    j, fake = judge(json.dumps({"claims": claims}))
+    got = await j.faithfulness("q", "a", passages)
+    assert got is not None and got.score == 1.0
+    [prompt] = fake.check_calls
+    assert "The subject may use them." in prompt  # the whole passage, not only the quote
+    assert "Services and ports" not in prompt  # only the passage the quote is in
+    assert "directly implied" in prompt and "Watch negations" in prompt
+    assert passage_of("not in any passage at all here", passages) is None
