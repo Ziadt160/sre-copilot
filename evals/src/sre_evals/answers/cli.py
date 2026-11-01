@@ -206,22 +206,38 @@ async def _run(
 @app.command("judge")
 def judge_cmd(
     run_id: Annotated[int, typer.Option("--run", help="Answer run whose answers to judge.")],
-    judge: Annotated[str, typer.Option(help="Judge model, provider:name.")],
+    judge: Annotated[
+        str,
+        typer.Option(
+            help="Judge: provider:name (DeepEval), rubric:provider:name, or file:<path> "
+            "(judgements written by a Claude subagent, evals/judging/claude-judge.md)."
+        ),
+    ],
     repeat: Annotated[int, typer.Option(help="Judge the same answers N times (noise).")] = 1,
     database_url: DbOption = None,
 ) -> None:
     """Judge a stored run's answers again (no generation); one new run per repeat."""
+    from sre_evals.answers.file_judge import PREFIX as FILE_PREFIX
+    from sre_evals.answers.file_judge import FileJudge
     from sre_evals.answers.rejudge import StoredRunError, rejudge_run
 
     if repeat < 1:
         raise typer.BadParameter("--repeat must be at least 1")
-    judge_obj, _ = _judge(judge)
+    file_path = Path(judge.removeprefix(FILE_PREFIX)) if judge.startswith(FILE_PREFIX) else None
+    if file_path is not None and repeat > 1:
+        raise typer.BadParameter("a file of judgements gives the same scores every time")
+    judge_obj: Judge | None = None if file_path is not None else _judge(judge)[0]
     dsn = database_url or get_settings().database_url
 
     async def go() -> None:
         conn = await connect(dsn, autocommit=True)
         try:
-            outcomes = await rejudge_run(conn, run_id, judge_obj, repeat=repeat)
+            j = judge_obj
+            if file_path is not None:
+                stored = await load_details(conn, run_id)
+                j = FileJudge(file_path, {i.question: i.item_id for i in stored})
+            assert j is not None
+            outcomes = await rejudge_run(conn, run_id, j, repeat=repeat)
         except StoredRunError as e:
             console.print(f"refused: {e}")
             raise typer.Exit(2) from e
