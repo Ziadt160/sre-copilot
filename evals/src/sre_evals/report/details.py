@@ -244,6 +244,7 @@ def render_details(
     runs: Sequence[dict[str, Any]],
     storage: dict[str, dict[str, Any]] | None = None,
     sweeps: Sequence[dict[str, Any]] = (),
+    answers: Sequence[str] = (),
 ) -> str:
     """Markdown for docs/results.md. Deterministic for the same inputs (no timestamps)."""
     runs = sorted(runs, key=lambda r: r["experiment"])
@@ -255,7 +256,7 @@ def render_details(
         "",
     ]
     if not runs:
-        return "\n".join([*lines, "_No eval runs yet._", ""])
+        return "\n".join([*lines, "_No eval runs yet._", *answers, ""])
 
     shas = sorted({str(r["stamps"].get("git_sha", "unknown")) for r in runs})
     goldens = sorted({str(r["golden_version"]) for r in runs})
@@ -409,4 +410,5 @@ def render_details(
     else:
         lines.append("_No dense experiments yet._")
     lines += render_sweeps(sweeps)
+    lines += answers
     return "\n".join(lines) + "\n"
