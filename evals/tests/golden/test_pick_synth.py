@@ -95,6 +95,7 @@ async def test_synthesize_one_golden_per_context(make_llm: Any) -> None:
         item = by_key[r.chunk_key]
         assert item.gold_passages[0].quote == r.body
         assert item.gold_passages[0].source_path == r.source_path
+        assert item.filters is not None and item.filters.k8s_versions == [r.k8s_version]
         assert re.search(rf"about {r.title}\?", item.question)
         assert item.status == "candidate" and item.origin == "synthetic"
         assert item.synth_model == "ollama:fake-model"

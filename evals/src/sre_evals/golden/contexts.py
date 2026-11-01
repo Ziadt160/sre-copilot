@@ -1,9 +1,11 @@
 """Picking context chunks for golden-question synthesis.
 
-Factual contexts are concept/task chunks spread across documents. Exact-string contexts are
+Factual contexts are concept/task chunks spread across pages. Exact-string contexts are
 chunks that contain a literal worth asking about (an error name, a CLI flag or a field path),
 found by regex; the matched string is recorded so the question can be forced to contain it.
-Selection is deterministic for a seed.
+A literal must be rare (on few pages of its version) and kinds take turns, so boilerplate such
+as kubectl's global flags, repeated on ~120 generated pages, cannot crowd out the rest.
+Pages about writing the docs are skipped. Selection is deterministic for a seed.
 """
 
 from __future__ import annotations
@@ -55,6 +57,11 @@ _KINDS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("flag", FLAG_RE),
     ("field", FIELD_RE),
 )
+KIND_ORDER = ("error", "field", "flag")
+# Most distinct pages (in one version) a literal may appear on; with more, a single gold passage
+# is arbitrary. Error names are few in the docs and central to SRE questions, so they get room.
+MAX_DOC_FREQ = {"error": 10, "flag": 3, "field": 3}
+EXCLUDED_PATH_PARTS = ("/docs/contribute/",)  # how to write the docs, not how to run Kubernetes
 
 
 class ContextRow(BaseModel):
@@ -139,10 +146,11 @@ async def fetch_chunks(
 def _spread(
     candidates: list[ContextRow], n: int, rng: random.Random, *, distinct_matches: bool
 ) -> list[ContextRow]:
-    """Round-robin across documents (order shuffled by the seed) until n rows are chosen."""
-    by_doc: dict[tuple[str, str], list[ContextRow]] = defaultdict(list)
+    """Round-robin across pages (order shuffled by the seed) until n rows are chosen. A page
+    counts once across versions: most pages are near-identical between versions."""
+    by_doc: dict[str, list[ContextRow]] = defaultdict(list)
     for c in candidates:
-        by_doc[(c.source_path, c.k8s_version)].append(c)
+        by_doc[c.source_path].append(c)
     docs = sorted(by_doc)
     rng.shuffle(docs)
     for d in docs:
@@ -169,29 +177,77 @@ def _spread(
     return chosen[:n]
 
 
+def _interleave(per_kind: Sequence[list[ContextRow]], n: int) -> list[ContextRow]:
+    """Kinds take turns. First pass: each pick is a new page and a new literal; second pass
+    (only if short): repeated literals on new pages."""
+    chosen: list[ContextRow] = []
+    pages: set[str] = set()
+    matches: set[str | None] = set()
+    for strict in (True, False):
+        queues = [list(rows) for rows in per_kind]
+        while len(chosen) < n and any(queues):
+            for q in queues:
+                while q:
+                    r = q.pop(0)
+                    if r.source_path in pages or (strict and r.matched in matches):
+                        continue
+                    chosen.append(r)
+                    pages.add(r.source_path)
+                    matches.add(r.matched)
+                    break
+                if len(chosen) >= n:
+                    break
+    return chosen
+
+
+def _doc_freq(chunks: Sequence[dict[str, Any]]) -> dict[tuple[str, str], int]:
+    """(version, literal) -> number of distinct pages containing it, over the eligible chunks."""
+    pages: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for ch in chunks:
+        for _kind, s in find_exact_strings(ch["body"]):
+            pages[(ch["k8s_version"], s)].add(ch["source_path"])
+    return {key: len(p) for key, p in pages.items()}
+
+
 def select_contexts(
     chunks: Sequence[dict[str, Any]], stratum: PickStratum, n: int, seed: int
 ) -> list[ContextRow]:
     """Pure selection step, deterministic for (chunks, stratum, n, seed)."""
     rng = random.Random(seed)  # noqa: S311  (selection, not security)
-    candidates: list[ContextRow] = []
-    for ch in chunks:
-        base = {k: ch[k] for k in ("chunk_key", "source_path", "k8s_version", "url", "title")}
-        if stratum == "factual":
-            if ch["doc_type"] not in ("concept", "task"):
-                continue
-            candidates.append(ContextRow(body=ch["body"], stratum="factual", **base))
-        else:
-            hits = find_exact_strings(ch["body"])
-            if not hits:
-                continue
-            kind, s = hits[rng.randrange(len(hits))]
-            candidates.append(
-                ContextRow(
-                    body=ch["body"], stratum="exact_string", matched=s, match_kind=kind, **base
-                )
-            )
-    picked = _spread(candidates, n, rng, distinct_matches=stratum == "exact_string")
+    chunks = [
+        ch for ch in chunks if not any(part in ch["source_path"] for part in EXCLUDED_PATH_PARTS)
+    ]
+    keys = ("chunk_key", "source_path", "k8s_version", "url", "title")
+    if stratum == "factual":
+        candidates = [
+            ContextRow(body=ch["body"], stratum="factual", **{k: ch[k] for k in keys})
+            for ch in chunks
+            if ch["doc_type"] in ("concept", "task")
+        ]
+        picked = _spread(candidates, n, rng, distinct_matches=False)
+    else:
+        doc_freq = _doc_freq(chunks)
+        by_kind: dict[str, list[ContextRow]] = defaultdict(list)
+        for ch in chunks:
+            rare = [
+                (kind, s)
+                for kind, s in find_exact_strings(ch["body"])
+                if doc_freq[(ch["k8s_version"], s)] <= MAX_DOC_FREQ[kind]
+            ]
+            for kind in KIND_ORDER:
+                of_kind = [s for k, s in rare if k == kind]
+                if of_kind:
+                    by_kind[kind].append(
+                        ContextRow(
+                            body=ch["body"],
+                            stratum="exact_string",
+                            matched=of_kind[rng.randrange(len(of_kind))],
+                            match_kind=kind,
+                            **{k: ch[k] for k in keys},
+                        )
+                    )
+        spreads = [_spread(by_kind[k], n, rng, distinct_matches=True) for k in KIND_ORDER]
+        picked = _interleave(spreads, n)
     return sorted(picked, key=lambda r: (r.source_path, r.k8s_version, r.chunk_key))
 
 

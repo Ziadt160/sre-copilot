@@ -14,7 +14,7 @@ from deepeval.synthesizer.config import EvolutionConfig, FiltrationConfig
 from sre_evals.golden.contexts import ContextRow
 from sre_evals.golden.llm import ModelSpec, OpenAICompatLLM
 from sre_shared.config import Limits
-from sre_shared.models import GoldenItem, GoldPassage
+from sre_shared.models import GoldenItem, GoldPassage, RetrievalFilters
 
 log = logging.getLogger("sre_evals.golden")
 
@@ -171,6 +171,9 @@ async def a_synthesize(
                 gold_passages=[
                     GoldPassage(source_path=c.source_path, k8s_version=c.k8s_version, quote=c.body)
                 ],
+                # Asked against the gold passage's version, as a user picks one in the UI: most
+                # pages are near-identical across versions, and the gold names one of them.
+                filters=RetrievalFilters(k8s_versions=[c.k8s_version]),
                 origin="synthetic",
                 status="candidate",
                 synth_model=llm.spec.label,

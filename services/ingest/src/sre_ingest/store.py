@@ -13,15 +13,12 @@ from typing import Any
 import numpy as np
 import psycopg
 from pgvector import HalfVector
-from pgvector.psycopg import register_vector
 from psycopg import sql
-from psycopg.rows import dict_row
 
 from sre_shared.config import CorpusSource
-from sre_shared.db import SEARCH_PATH_OPTION
+from sre_shared.db import connect_sync
 from sre_shared.embed.base import SPECS
 from sre_shared.models import ChunkRecord, DocumentRecord, EmbeddingModelName
-from sre_shared.settings import get_settings
 
 Conn = psycopg.Connection[Any]
 
@@ -32,14 +29,8 @@ class ContentChanged(RuntimeError):
 
 @contextmanager
 def open_conn(dsn: str | None = None) -> Iterator[Conn]:
-    conn: Conn = psycopg.connect(
-        dsn or get_settings().database_url,
-        options=SEARCH_PATH_OPTION,
-        row_factory=dict_row,
-        autocommit=False,
-    )
+    conn: Conn = connect_sync(dsn)
     try:
-        register_vector(conn)
         yield conn
     finally:
         conn.close()
