@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from sre_evals.answers.calibrate import plan_tokens
+from sre_evals.answers.judge import Judgement
 from sre_evals.answers.judge_cache import CachedJudge
 from sre_evals.answers.label import LabelItem, Passage
 
@@ -22,13 +23,13 @@ class CountingJudge:
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
-    ) -> float | None:
+    ) -> Judgement | None:
         self.calls += 1
-        return self.score
+        return None if self.score is None else Judgement(self.score, "because")
 
-    async def relevancy(self, question: str, answer: str) -> float | None:
+    async def relevancy(self, question: str, answer: str) -> Judgement | None:
         self.calls += 1
-        return self.score
+        return None if self.score is None else Judgement(self.score, "because")
 
 
 def item(n: int) -> LabelItem:
@@ -39,11 +40,16 @@ def item(n: int) -> LabelItem:
 async def test_scores_survive_a_new_run_and_failures_are_retried(tmp_path: Path) -> None:
     inner = CountingJudge()
     first = CachedJudge(inner, tmp_path)
-    assert await first.faithfulness("q", "a", ["s"]) == 0.75
-    assert await first.faithfulness("q", "a", ["s"]) == 0.75 and inner.calls == 1
+    assert await first.faithfulness("q", "a", ["s"]) == Judgement(0.75, "because")
+    assert (
+        await first.faithfulness("q", "a", ["s"]) == Judgement(0.75, "because") and inner.calls == 1
+    )
     again = CachedJudge(CountingJudge(), tmp_path)  # a later calibration run
-    assert await again.faithfulness("q", "a", ["s"]) == 0.75 and again.judge.calls == 0  # type: ignore[attr-defined]
-    assert await again.faithfulness("q", "a different answer", ["s"]) == 0.75
+    assert (
+        await again.faithfulness("q", "a", ["s"]) == Judgement(0.75, "because")
+        and again.judge.calls == 0
+    )  # type: ignore[attr-defined]
+    assert await again.faithfulness("q", "a different answer", ["s"]) == Judgement(0.75, "because")
     assert again.judge.calls == 1  # type: ignore[attr-defined]
     failing = CachedJudge(CountingJudge(score=None), tmp_path / "other")
     assert await failing.faithfulness("q", "a", ["s"]) is None
@@ -57,7 +63,7 @@ async def test_each_judge_and_prompt_version_has_its_own_file(tmp_path: Path) ->
     other.prompt_version = "judge-rubric-v2"
     b = CachedJudge(other, tmp_path)
     await a.faithfulness("q", "a", ["s"])
-    assert await b.faithfulness("q", "a", ["s"]) == 0.1 and a.path != b.path
+    assert await b.faithfulness("q", "a", ["s"]) == Judgement(0.1, "because") and a.path != b.path
 
 
 async def test_the_quota_plan_counts_only_uncached_answers(tmp_path: Path) -> None:

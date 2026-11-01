@@ -93,6 +93,9 @@ async def test_run_stores_answer_run_and_scores(db: Any) -> None:
     by = {(r["item_id"], r["metric"]): r for r in rows}
     assert by[("fac-0001", "faithfulness")]["value"] == 1.0
     assert by[("exs-0001", "faithfulness")]["value"] == 0.5
+    # Each judged score keeps the judge's explanation beside it.
+    assert by[("exs-0001", "faithfulness")]["details"] == {"explanation": "fake faithfulness 0.5"}
+    assert by[("exs-0001", "answer_relevancy")]["details"] == {"explanation": "fake relevancy 0.75"}
     assert ("unans-0001", "faithfulness") not in by  # abstained: nothing to judge
     assert by[("fac-0001", "citation_hit")]["value"] == 1.0
     assert by[("exs-0001", "citation_hit")]["value"] == 0.0

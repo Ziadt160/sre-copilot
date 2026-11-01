@@ -24,7 +24,8 @@ One `eval_runs` row per repeat (`--repeat N` stores N). `eval_runs.summary` keys
     latency_ms                            {"p50", "p95", "mean"} of the answer's total time
     by_stratum                            {stratum: {"n", "abstain_rate", "faithfulness", ...}}
 
-`eval_scores` rows (k = 0): faithfulness, answer_relevancy (only when scored), cited,
+`eval_scores` rows (k = 0): faithfulness, answer_relevancy (only when scored; `details`
+holds the judge's `explanation`), cited,
 citation_hit (items with gold), invalid_citations, abstained, prompt_tokens,
 completion_tokens, context_tokens, latency_ms, and `answer_detail` (value 1.0) whose `details`
 hold what the labeller shows: answer text, citations, invalid citation ids, and the exact
@@ -80,6 +81,8 @@ class ItemRun:
     scores: AnswerScores
     faithfulness: float | None = None
     relevancy: float | None = None
+    faithfulness_explanation: str | None = None  # the judge's reason, stored with the score
+    relevancy_explanation: str | None = None
 
 
 @dataclass
@@ -99,7 +102,7 @@ def plan_judge_tokens(answer_cfg: AnswerConfig, n_answers: int, judge: Judge | N
     `judge` (its `faithfulness_calls` / `reply_tokens`), DeepEval's when None."""
     kw = {
         k: getattr(judge, k)
-        for k in ("faithfulness_calls", "reply_tokens")
+        for k in ("faithfulness_calls", "relevancy_calls", "reply_tokens")
         if judge is not None and hasattr(judge, k)
     }
     per = estimate_judge_tokens(
@@ -199,10 +202,16 @@ def _score_rows(run_id: int, r: ItemRun) -> list[list[Any]]:
     ]
     if r.scores.citation_hit is not None:
         rows.append([run_id, iid, "citation_hit", 0, float(r.scores.citation_hit), None])
+
+    def why(text: str | None) -> Any:
+        return None if text is None else Jsonb({"explanation": text})
+
     if r.faithfulness is not None:
-        rows.append([run_id, iid, "faithfulness", 0, r.faithfulness, None])
+        rows.append(
+            [run_id, iid, "faithfulness", 0, r.faithfulness, why(r.faithfulness_explanation)]
+        )
     if r.relevancy is not None:
-        rows.append([run_id, iid, "answer_relevancy", 0, r.relevancy, None])
+        rows.append([run_id, iid, "answer_relevancy", 0, r.relevancy, why(r.relevancy_explanation)])
     detail = {
         "question": res.question,
         "answer": res.answer,
@@ -286,8 +295,12 @@ async def _one(
     run = ItemRun(item, result, score_answer(result, item))
     if judge is not None and not result.abstained and result.answer.strip():
         contexts = [chunk_text(c) for c in result.context]
-        run.faithfulness = await judge.faithfulness(item.question, result.answer, contexts)
-        run.relevancy = await judge.relevancy(item.question, result.answer)
+        faith = await judge.faithfulness(item.question, result.answer, contexts)
+        rel = await judge.relevancy(item.question, result.answer)
+        if faith is not None:
+            run.faithfulness, run.faithfulness_explanation = faith.score, faith.explanation
+        if rel is not None:
+            run.relevancy, run.relevancy_explanation = rel.score, rel.explanation
     return run
 
 

@@ -234,6 +234,7 @@ BASE_REPLIES: dict[str, Any] = {
     "claims": {"claims": ["c1", "c2"]},
     "statements": {"statements": ["s1"]},
     "verdicts": {"verdicts": [{"verdict": "yes"}, {"verdict": "yes"}]},
+    "reason": {"reason": "fake reason"},
 }
 
 
@@ -273,10 +274,10 @@ async def test_an_answer_with_no_extracted_claims_is_not_scored_fully_faithful()
 async def test_claims_the_passages_do_not_support_are_not_scored_supported() -> None:
     verdicts = {"verdicts": [{"verdict": "borderline"}, {"verdict": "borderline"}]}
     judge = build_judge(_replying_client({**BASE_REPLIES, "verdicts": verdicts}))
-    score = await judge.faithfulness("q", "a", ["p"])
+    got = await judge.faithfulness("q", "a", ["p"])
     # The labeller's 's' means "every claim supported by the passages"; DeepEval's default
     # (penalize_ambiguous_claims=False) counts "not in the passages" as supported.
-    assert score is not None and score_to_label(score) != SUPPORTED, score
+    assert got is not None and score_to_label(got.score) != SUPPORTED, got
 
 
 # -- 6. quota guard ------------------------------------------------------------------------------

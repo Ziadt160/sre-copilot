@@ -3,7 +3,9 @@
 `Judge` is the small surface the runner and the calibration use; tests inject fakes. The real
 one, `DeepEvalJudge`, drives DeepEval's `FaithfulnessMetric` and `AnswerRelevancyMetric` with
 `ChatClientLLM`, a `DeepEvalBaseLLM` over `sre_shared.llm.ChatClient` (so hosted judges go
-through the quota guard and the token ledger). Temperature is 0 and `include_reason` is off.
+through the quota guard and the token ledger). Temperature is 0. Every score comes with the
+judge's explanation (`Judgement`): DeepEval's reason (one extra call per metric, on by
+default; `include_reason=False` saves it), or the rubric judge's claim list.
 
 Versions recorded with every run: `JUDGE_PROMPT_VERSION` (our JSON-reply wrapper around
 DeepEval's own prompts; bump it when `ChatClientLLM`'s instructions change) and
@@ -39,6 +41,14 @@ def metric_version() -> str:
     return f"deepeval-{version('deepeval')}"
 
 
+@dataclass(frozen=True)
+class Judgement:
+    """A judge's score in [0, 1] and why; `explanation` is None when the judge gave none."""
+
+    score: float
+    explanation: str | None = None
+
+
 class Judge(Protocol):
     """Scores one answer. `None` means the judge could not produce a score (bad JSON, ...)."""
 
@@ -46,9 +56,9 @@ class Judge(Protocol):
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
-    ) -> float | None: ...
+    ) -> Judgement | None: ...
 
-    async def relevancy(self, question: str, answer: str) -> float | None: ...
+    async def relevancy(self, question: str, answer: str) -> Judgement | None: ...
 
 
 class ChatClientLLM(DeepEvalBaseLLM):  # type: ignore[no-untyped-call]
@@ -137,8 +147,8 @@ class DeepEvalJudge:
 
     llm: DeepEvalBaseLLM
     label: str
+    include_reason: bool = True  # DeepEval writes a reason: one more call per metric
     prompt_version: str = JUDGE_PROMPT_VERSION
-    faithfulness_calls: int = FAITHFULNESS_CALLS  # for the quota plan
     reply_tokens: int = JUDGE_MAX_TOKENS // 2  # likely reply size per call, for the plan
     faithfulness_failures: int = 0  # reply not parseable against the schema
     relevancy_failures: int = 0
@@ -149,7 +159,15 @@ class DeepEvalJudge:
     def failures(self) -> int:
         return self.faithfulness_failures + self.relevancy_failures
 
-    async def _score(self, metric: Any, case: LLMTestCase, *, extracted: str) -> float | None:
+    @property
+    def faithfulness_calls(self) -> int:  # for the quota plan
+        return FAITHFULNESS_CALLS + int(self.include_reason)
+
+    @property
+    def relevancy_calls(self) -> int:
+        return RELEVANCY_CALLS + int(self.include_reason)
+
+    async def _score(self, metric: Any, case: LLMTestCase, *, extracted: str) -> Judgement | None:
         """None when the judge's reply could not be parsed (counted as a failure) or it
         extracted nothing to judge (counted in `no_claims` / `no_statements`). Transport
         problems (connection, auth, timeout) are not scores: they propagate."""
@@ -170,15 +188,18 @@ class DeepEvalJudge:
                 self.no_statements += 1
             return None  # DeepEval scores "nothing to check" as 1.0; that is not faithfulness
         score = metric.score
-        return None if score is None else float(score)
+        if score is None:
+            return None
+        reason = getattr(metric, "reason", None) if self.include_reason else None
+        return Judgement(float(score), str(reason) if reason else None)
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
-    ) -> float | None:
+    ) -> Judgement | None:
         # "The passages do not say" is not support: the labeller's `s` needs every claim backed.
         metric = FaithfulnessMetric(
             model=self.llm,
-            include_reason=False,
+            include_reason=self.include_reason,
             async_mode=True,
             verbose_mode=False,
             penalize_ambiguous_claims=True,
@@ -186,9 +207,9 @@ class DeepEvalJudge:
         case = LLMTestCase(input=question, actual_output=answer, retrieval_context=list(contexts))
         return await self._score(metric, case, extracted="claims")
 
-    async def relevancy(self, question: str, answer: str) -> float | None:
+    async def relevancy(self, question: str, answer: str) -> Judgement | None:
         metric = AnswerRelevancyMetric(
-            model=self.llm, include_reason=False, async_mode=True, verbose_mode=False
+            model=self.llm, include_reason=self.include_reason, async_mode=True, verbose_mode=False
         )
         case = LLMTestCase(input=question, actual_output=answer)
         return await self._score(metric, case, extracted="statements")
@@ -204,15 +225,16 @@ def estimate_judge_tokens(
     *,
     relevancy: bool = True,
     faithfulness_calls: int = FAITHFULNESS_CALLS,
+    relevancy_calls: int = RELEVANCY_CALLS,
     reply_tokens: int = JUDGE_MAX_TOKENS // 2,
 ) -> int:
     """Rough tokens one judged answer will cost (4 chars per token, every call carries the
     answer and the passages, plus the reply budget). Used for the quota guard, so it errs high.
-    `faithfulness_calls` / `reply_tokens` describe the faithfulness judge (the rubric judge
-    makes one call with a longer reply)."""
+    `faithfulness_calls` / `relevancy_calls` / `reply_tokens` describe the judge (a reason is
+    one more call per metric; the rubric judge makes one faithfulness call, longer reply)."""
     chars = len(answer) + sum(len(c) for c in contexts)
     faith = faithfulness_calls * (chars // 4 + 400 + reply_tokens)
-    rel = (RELEVANCY_CALLS if relevancy else 0) * (chars // 4 + 400 + JUDGE_MAX_TOKENS // 2)
+    rel = (relevancy_calls if relevancy else 0) * (chars // 4 + 400 + JUDGE_MAX_TOKENS // 2)
     return faith + rel
 
 
@@ -227,6 +249,7 @@ __all__ = [
     "DeepEvalJudge",
     "JsonReplyError",
     "Judge",
+    "Judgement",
     "build_judge",
     "check_judge_budget",
     "estimate_judge_tokens",

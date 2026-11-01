@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
+from sre_evals.answers.judge import Judgement
 from sre_evals.runner.testing import SRC, VER, W, chunk
 from sre_shared.models import (
     ANONYMOUS,
@@ -98,12 +99,13 @@ class FakeJudge:
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
-    ) -> float | None:
+    ) -> Judgement | None:
         self.seen.append((question, tuple(contexts)))
         score = self.faith.get(question, self.default_faith)
         if score is None:
             self.failures += 1
-        return score
+            return None
+        return Judgement(score, f"fake faithfulness {score}")
 
-    async def relevancy(self, question: str, answer: str) -> float | None:
-        return self.rel
+    async def relevancy(self, question: str, answer: str) -> Judgement | None:
+        return None if self.rel is None else Judgement(self.rel, f"fake relevancy {self.rel}")

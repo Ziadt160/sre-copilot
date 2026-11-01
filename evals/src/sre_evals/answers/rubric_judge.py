@@ -22,7 +22,7 @@ from typing import Literal
 import openai
 from pydantic import BaseModel
 
-from sre_evals.answers.judge import DeepEvalJudge
+from sre_evals.answers.judge import DeepEvalJudge, Judgement
 from sre_evals.golden.llm import JsonReplyError, parse_reply
 from sre_shared.llm import ChatClient
 
@@ -115,6 +115,23 @@ def score_reply(reply: RubricReply) -> float | None:
     return share
 
 
+def explain(reply: RubricReply, turned: int = 0) -> str:
+    """The judge's reasoning as text: a summary line, then each claim with its verdict and
+    the quote it rests on (`*` marks a claim that answers the question)."""
+    n_ok = sum(c.verdict == "supported" for c in reply.claims)
+    head = f"{n_ok} of {len(reply.claims)} claims supported"
+    if any(c.answers_question and c.verdict != "supported" for c in reply.claims):
+        head += "; a claim that answers the question is not"
+    if turned:
+        head += f"; {turned} quoted evidence not found in the sources"
+    lines = [head + "."]
+    for c in reply.claims:
+        mark = "*" if c.answers_question else " "
+        quote = f' <- "{c.evidence}"' if c.evidence else ""
+        lines.append(f"{mark} [{c.verdict}] {c.claim}{quote}")
+    return "\n".join(lines)
+
+
 @dataclass
 class RubricJudge:
     """`Judge` whose faithfulness is one rubric call; relevancy goes to `relevancy_judge`."""
@@ -147,12 +164,16 @@ class RubricJudge:
         return self.relevancy_judge.no_statements
 
     @property
+    def relevancy_calls(self) -> int:  # for the quota plan
+        return self.relevancy_judge.relevancy_calls
+
+    @property
     def failures(self) -> int:
         return self.faithfulness_failures + self.relevancy_failures
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
-    ) -> float | None:
+    ) -> Judgement | None:
         messages = build_messages(question, answer, contexts)
         for attempt in range(self.max_repairs + 1):
             try:
@@ -198,8 +219,9 @@ class RubricJudge:
             score = score_reply(reply)
             if score is None:
                 self.no_claims += 1
-            return score
+                return None
+            return Judgement(score, explain(reply, turned))
         raise AssertionError("unreachable")
 
-    async def relevancy(self, question: str, answer: str) -> float | None:
+    async def relevancy(self, question: str, answer: str) -> Judgement | None:
         return await self.relevancy_judge.relevancy(question, answer)

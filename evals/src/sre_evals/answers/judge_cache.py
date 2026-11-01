@@ -18,7 +18,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from sre_evals.answers.judge import JUDGE_PROMPT_VERSION, Judge
+from sre_evals.answers.judge import JUDGE_PROMPT_VERSION, Judge, Judgement
 from sre_shared.settings import get_settings
 
 
@@ -40,12 +40,14 @@ class CachedJudge:
         self.prompt_version = str(getattr(judge, "prompt_version", JUDGE_PROMPT_VERSION))
         name = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{self.label}-{self.prompt_version}")
         self.path = (directory or cache_dir()) / f"{name}.jsonl"
-        self._scores: dict[str, float] = {}
+        self._scores: dict[str, Judgement] = {}
         if self.path.exists():
             for line in self.path.read_text(encoding="utf-8").splitlines():
                 try:
                     row = json.loads(line)
-                    self._scores[row["key"]] = float(row["score"])
+                    self._scores[row["key"]] = Judgement(
+                        float(row["score"]), row.get("explanation")
+                    )
                 except (ValueError, KeyError, TypeError):
                     continue  # a line cut off by a crash: that answer is judged again
         self.hits = 0
@@ -56,30 +58,31 @@ class CachedJudge:
     def cached(self, metric: str, question: str, answer: str, contexts: Sequence[str] = ()) -> bool:
         return item_key(metric, question, answer, contexts) in self._scores
 
-    def _put(self, key: str, score: float) -> None:
-        self._scores[key] = score
+    def _put(self, key: str, judged: Judgement) -> None:
+        self._scores[key] = judged
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        row = {"key": key, "score": judged.score, "explanation": judged.explanation}
         with self.path.open("a", encoding="utf-8", newline="\n") as f:
-            f.write(json.dumps({"key": key, "score": score}) + "\n")
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
-    ) -> float | None:
+    ) -> Judgement | None:
         key = item_key("faithfulness", question, answer, contexts)
         if key in self._scores:
             self.hits += 1
             return self._scores[key]
-        score = await self.judge.faithfulness(question, answer, contexts)
-        if score is not None:
-            self._put(key, score)
-        return score
+        judged = await self.judge.faithfulness(question, answer, contexts)
+        if judged is not None:
+            self._put(key, judged)
+        return judged
 
-    async def relevancy(self, question: str, answer: str) -> float | None:
+    async def relevancy(self, question: str, answer: str) -> Judgement | None:
         key = item_key("relevancy", question, answer)
         if key in self._scores:
             self.hits += 1
             return self._scores[key]
-        score = await self.judge.relevancy(question, answer)
-        if score is not None:
-            self._put(key, score)
-        return score
+        judged = await self.judge.relevancy(question, answer)
+        if judged is not None:
+            self._put(key, judged)
+        return judged

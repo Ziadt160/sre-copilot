@@ -65,7 +65,10 @@ GOOD = json.dumps(
 
 async def test_one_call_scores_and_a_bad_reply_gets_one_repair() -> None:
     j, fake = judge("not json", GOOD)
-    assert await j.faithfulness("q", "a [1].", ["source text"]) == 1.0
+    got = await j.faithfulness("q", "a [1].", ["source text"])
+    assert got is not None and got.score == 1.0
+    assert got.explanation is not None and got.explanation.startswith("1 of 1 claims supported.")
+    assert '<- "source text"' in got.explanation  # the claim list is the explanation
     assert len(fake.calls) == 2 and j.faithfulness_failures == 0
     assert fake.calls[0]["response_format"] == {"type": "json_object"}
     assert fake.calls[0]["temperature"] == 0.0
@@ -110,8 +113,9 @@ async def test_supported_claims_need_evidence_that_is_in_the_sources() -> None:
         {"claim": "no quote", "verdict": "supported", "evidence": ""},
     ]  # fmt: skip
     j, _ = judge(json.dumps({"claims": claims}))
-    score = await j.faithfulness("q", "a", [src])
-    assert j.unverified_evidence == 2 and score is not None and abs(score - 1 / 3) < 1e-9
+    got = await j.faithfulness("q", "a", [src])
+    assert j.unverified_evidence == 2 and got is not None and abs(got.score - 1 / 3) < 1e-9
+    assert got.explanation is not None and "2 quoted evidence not found" in got.explanation
     assert [c.verdict for c in j.last_reply.claims] == ["supported", "unsupported", "unsupported"]  # type: ignore[union-attr]
 
 

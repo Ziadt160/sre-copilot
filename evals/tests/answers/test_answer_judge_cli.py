@@ -30,6 +30,7 @@ REPLIES: dict[str, Any] = {
     "claims": {"claims": ["c1", "c2"]},
     "statements": {"statements": ["s1", "s2"]},
     "verdicts": {"verdicts": [{"verdict": "yes"}, {"verdict": "no", "reason": "r"}]},
+    "reason": {"reason": "one of two claims is contradicted"},
 }
 
 
@@ -80,14 +81,15 @@ async def test_deepeval_judge_scores_with_a_custom_model_at_temperature_zero() -
     judge = build_judge(client)
     assert judge.label == "ollama:fake-8b"
     # Two verdicts, one "yes": half of the claims are supported / half the statements relevant.
-    assert (
-        await judge.faithfulness("What is a Pod?", "A Pod runs containers.", ["Pods run."]) == 0.5
-    )
-    assert await judge.relevancy("What is a Pod?", "A Pod runs containers.") == 0.5
+    faith = await judge.faithfulness("What is a Pod?", "A Pod runs containers.", ["Pods run."])
+    rel = await judge.relevancy("What is a Pod?", "A Pod runs containers.")
+    assert faith is not None and faith.score == 0.5
+    assert faith.explanation == "one of two claims is contradicted"  # DeepEval's reason, kept
+    assert rel is not None and rel.score == 0.5 and rel.explanation
     assert judge.failures == 0
     assert asyn.calls and all(c["temperature"] == 0.0 for c in asyn.calls)
     assert all(c["response_format"] == {"type": "json_object"} for c in asyn.calls)
-    assert judge.llm.calls >= 5  # type: ignore[attr-defined]
+    assert judge.llm.calls >= 7  # 5 scoring calls + a reason per metric  # type: ignore[attr-defined]
     assert judge.llm.prompt_tokens == 10 * judge.llm.calls  # type: ignore[attr-defined]
     assert metric_version().startswith("deepeval-")
 

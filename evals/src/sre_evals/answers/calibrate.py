@@ -25,6 +25,7 @@ from psycopg.types.json import Jsonb
 from sre_evals.answers.judge import (
     JUDGE_PROMPT_VERSION,
     Judge,
+    Judgement,
     check_judge_budget,
     estimate_judge_tokens,
     metric_version,
@@ -67,6 +68,8 @@ class JudgeAgreement:
     kappa_binary: float | None = None
     vs_reference: dict[str, float | None] = field(default_factory=dict)
     prompt_version: str = JUDGE_PROMPT_VERSION
+    # "run_id/item_id" -> the label, the judge's label, score and explanation
+    items: dict[str, dict[str, Any]] = field(default_factory=dict, repr=False)
     labels: dict[tuple[int, str], str] = field(default_factory=dict, repr=False)
     human: dict[tuple[int, str], str] = field(default_factory=dict, repr=False)  # joined labels
 
@@ -80,6 +83,7 @@ class JudgeAgreement:
             "kappa_binary": self.kappa_binary,
             "vs_reference": self.vs_reference,
             "prompt_version": self.prompt_version,
+            "items": self.items,
         }
 
 
@@ -144,16 +148,26 @@ async def calibrate(
 
         async def one(
             item: LabelItem, judge: Judge = h.judge
-        ) -> tuple[tuple[int, str], str | None]:
+        ) -> tuple[tuple[int, str], Judgement | None]:
             async with sem:
-                score = await judge.faithfulness(
+                got = await judge.faithfulness(
                     item.question, item.answer, [p.text for p in item.passages]
                 )
-            return item.key, None if score is None else score_to_label(score)
+            return item.key, got
 
-        judged = dict(await asyncio.gather(*(one(i) for i in chosen)))
+        got = dict(await asyncio.gather(*(one(i) for i in chosen)))
+        judged = {k: None if j is None else score_to_label(j.score) for k, j in got.items()}
         results.append(agreement(h.name, human, judged))
         results[-1].prompt_version = getattr(h.judge, "prompt_version", JUDGE_PROMPT_VERSION)
+        results[-1].items = {
+            f"{k[0]}/{k[1]}": {
+                "label": human[k],
+                "judge": judged[k],
+                "score": None if j is None else j.score,
+                "explanation": None if j is None else j.explanation,
+            }
+            for k, j in got.items()
+        }
 
     if reference is not None:
         ref = next(r for r in results if r.name == reference)
