@@ -1,0 +1,10 @@
+name: answer-k8
+description: "K sweep: 8 reranked chunks given to the model, no compression (baseline answer-k5)."
+embedding_model: gte-small
+legs: [dense]
+k: [3, 5, 8, 10]
+ef_search: 100
+answer:
+  k: 8
+  compression: none
+  temperature: 0.0

@@ -32,3 +32,18 @@ def test_answers_that_reached_max_tokens_are_counted() -> None:
         res = res.model_copy(update={"completion_tokens": completion})
         runs.append(ItemRun(item, res, score_answer(res, item)))
     assert summarize(runs, 3)["n_hit_max_tokens"] == 2  # result() uses max_tokens 512
+
+
+def test_the_answer_experiments_differ_from_the_baseline_only_where_named() -> None:
+    from sre_evals.answers.cli import load_answer_experiments
+
+    exps = load_answer_experiments()
+    base = effective_answer_config(exps["answer-k5"].answer)
+    want = {
+        "answer-k3": {"k": 3},
+        "answer-k8": {"k": 8},
+        "answer-k5-sentence": {"compression": "sentence"},
+    }
+    for name, diff in want.items():
+        got = effective_answer_config(exps[name].answer)
+        assert got == base.model_copy(update=diff), name

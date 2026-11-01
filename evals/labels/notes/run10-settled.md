@@ -26,4 +26,5 @@ Settled by the lead (Claude Opus 5.5), re-reading each answer against its source
 | exs-0022 | partly | supported | supported | source 5: a schedulerName mismatch makes the scheduler reject the group "as unschedulable"; with source 1's reasons, `Unschedulable` follows from the two sentences together |
 
 The packet the passes read (question, answer and sources as the model saw them, no scores or
-gold) is rebuilt from run 10's stored `answer_detail` rows.
+gold) is rebuilt byte for byte from run 10's stored rows with
+`tools/label_packet.py export --run 10`; `merge` reproduces the agreement figures above.

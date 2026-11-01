@@ -1,0 +1,10 @@
+name: answer-k5-sentence
+description: "Compression: 5 reranked chunks, sentences unrelated to the question dropped (baseline answer-k5)."
+embedding_model: gte-small
+legs: [dense]
+k: [3, 5, 8, 10]
+ef_search: 100
+answer:
+  k: 5
+  compression: sentence
+  temperature: 0.0
