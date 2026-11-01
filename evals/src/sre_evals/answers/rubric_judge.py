@@ -9,12 +9,24 @@ rubric's rule (`evals/labels/faithfulness-rubric.md`), so `stats.score_to_label`
 rubric's label. One call costs about a third of DeepEval's three, which makes a hosted
 reference judge affordable on the free quota.
 
-Selected with a `rubric:` prefix on a judge spec (`rubric:groq:openai/gpt-oss-120b`).
-Relevancy is not its job: it delegates to a DeepEval judge on the same model.
+Two passes (v3). Pass 1 lists the claims with a verdict and a verbatim evidence quote. Pass 2
+checks each claim pass 1 called supported in a separate short call that sees only the claim
+and its quote ("does this sentence state this claim? watch negations"), and its answer is the
+verdict. Why: in one long reply that extracts, quotes and decides at once, models anchor on the
+sentence that shares the claim's words and write "supported" without checking it (on exs-0026
+gpt-oss-120b, qwen3.8-27b and nemotron-3-ultra all quoted "does not clean up the rules" for
+"an OOM kill removes the rules"); asked the narrow question on its own, nemotron, gpt-oss-120b
+and even qwen2.5:7b read the same pair right.
+
+Selected with a `rubric:` prefix on a judge spec (`rubric:groq:openai/gpt-oss-120b`); a second
+model for pass 2 follows a `+` (`rubric:nvidia:nvidia/nemotron-3-ultra-550b-a55b+ollama:qwen2.5:7b`).
+Relevancy is not its job: it delegates to a DeepEval judge on the pass-1 model.
 """
 
 from __future__ import annotations
 
+import asyncio
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal
@@ -29,10 +41,28 @@ from sre_shared.llm import ChatClient
 # v2: every supported claim must quote its evidence, and the quote must be in the sources.
 # v1 (no evidence) called "an OOM kill removes the rules" supported where the source says
 # the rules are not cleaned up; kappa -0.04 against the labels on run 10.
-RUBRIC_PROMPT_VERSION = "judge-rubric-v2"
+# v3: a second pass checks each supported claim against its quote alone (module doc).
+RUBRIC_PROMPT_VERSION = "judge-rubric-v3"
 EVIDENCE_MIN_COVERAGE = 0.5  # the gold-matching rule: half the quote's 5-grams in one source
 RUBRIC_MAX_TOKENS = 3072  # the claim list, plus hidden reasoning on reasoning models
+VERIFY_MAX_TOKENS = 800  # one word, plus hidden reasoning on reasoning models
+VERIFY_PLAN_TOKENS = 6 * (VERIFY_MAX_TOKENS // 2 + 120)  # ~6 checked claims per answer
 PREFIX = "rubric:"
+VERIFIER_SEP = "+"
+
+VERIFY_PROMPT = (
+    "Claim: {claim}\nSource sentence: {evidence}\n\n"
+    "Does the source sentence state the claim? Watch negations. "
+    "Answer with exactly one word: supported, contradicted, or not_stated."
+)
+CHECKS = ("supported", "contradicted", "not_stated")
+
+
+def parse_check(text: str) -> str | None:
+    """The last of supported / contradicted / not_stated in the reply; None if absent."""
+    words = re.findall(r"[a-z_]+", text.lower().replace("not stated", "not_stated"))
+    return next((w for w in reversed(words) if w in CHECKS), None)
+
 
 SYSTEM = """\
 You check whether an answer is supported by the sources it was written from. This is a \
@@ -68,6 +98,7 @@ class ClaimVerdict(BaseModel):
     evidence: str = ""
     verdict: Literal["supported", "unsupported"]
     answers_question: bool = False
+    check: str | None = None  # pass 2's answer, when it ran
 
 
 class RubricReply(BaseModel):
@@ -124,28 +155,37 @@ def explain(reply: RubricReply, turned: int = 0) -> str:
         head += "; a claim that answers the question is not"
     if turned:
         head += f"; {turned} quoted evidence not found in the sources"
+    flipped = sum(c.check not in (None, "supported") for c in reply.claims)
+    if flipped:
+        head += f"; {flipped} overturned by the claim-by-claim check"
     lines = [head + "."]
     for c in reply.claims:
         mark = "*" if c.answers_question else " "
         quote = f' <- "{c.evidence}"' if c.evidence else ""
-        lines.append(f"{mark} [{c.verdict}] {c.claim}{quote}")
+        check = f", check: {c.check}" if c.check not in (None, "supported") else ""
+        lines.append(f"{mark} [{c.verdict}{check}] {c.claim}{quote}")
     return "\n".join(lines)
 
 
 @dataclass
 class RubricJudge:
-    """`Judge` whose faithfulness is one rubric call; relevancy goes to `relevancy_judge`."""
+    """`Judge` whose faithfulness is a rubric call (pass 1) plus a check per supported claim
+    (pass 2, on `verifier` or the same model); relevancy goes to `relevancy_judge`."""
 
     client: ChatClient
     relevancy_judge: DeepEvalJudge
+    verifier: ChatClient | None = None
     reasoning_effort: str | None = None
     max_repairs: int = 1
     prompt_version: str = RUBRIC_PROMPT_VERSION
-    faithfulness_calls: int = 1  # for the quota plan
+    faithfulness_calls: int = 1  # for the quota plan (pass 2 on the same model: reply_tokens)
     reply_tokens: int = RUBRIC_MAX_TOKENS // 2
     faithfulness_failures: int = 0
     no_claims: int = 0
     unverified_evidence: int = 0  # "supported" claims whose quote was not in the sources
+    checks: int = 0  # pass-2 calls
+    overturned: int = 0  # claims pass 2 turned unsupported
+    check_failures: int = 0  # pass-2 replies with no verdict (pass 1's verdict kept)
     calls: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -154,6 +194,38 @@ class RubricJudge:
 
     def __post_init__(self) -> None:
         self.label = f"{PREFIX}{self.client.spec.label}"
+        if self.verifier is not None:
+            self.label += f"{VERIFIER_SEP}{self.verifier.spec.label}"
+        else:  # pass 2 spends the same model's quota
+            self.reply_tokens += VERIFY_PLAN_TOKENS
+
+    async def _check(self, c: ClaimVerdict) -> ClaimVerdict:
+        """Pass 2 for one claim: only "supported" with quoted evidence is checked."""
+        if c.verdict != "supported" or not c.evidence.strip():
+            return c
+        client = self.verifier or self.client
+        prompt = VERIFY_PROMPT.format(claim=c.claim, evidence=c.evidence)
+        for _ in range(self.max_repairs + 1):
+            res = await client.acomplete(
+                [{"role": "user", "content": prompt}],
+                max_tokens=VERIFY_MAX_TOKENS,
+                temperature=0.0,
+            )
+            self.checks += 1
+            got = parse_check(res.text)
+            if got is not None:
+                break
+        else:
+            self.check_failures += 1
+            return c
+        if got == "supported":
+            return c.model_copy(update={"check": got})
+        self.overturned += 1
+        return c.model_copy(update={"verdict": "unsupported", "check": got})
+
+    async def verify(self, reply: RubricReply) -> RubricReply:
+        claims = await asyncio.gather(*(self._check(c) for c in reply.claims))
+        return RubricReply(claims=list(claims))
 
     @property
     def relevancy_failures(self) -> int:
@@ -215,6 +287,7 @@ class RubricJudge:
             assert isinstance(reply, RubricReply)
             reply, turned = checked(reply, contexts)
             self.unverified_evidence += turned
+            reply = await self.verify(reply)
             self.last_reply = reply
             score = score_reply(reply)
             if score is None:

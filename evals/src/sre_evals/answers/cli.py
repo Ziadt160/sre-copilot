@@ -55,13 +55,18 @@ def _client(spec: str) -> ChatClient:
 
 def _judge(spec: str) -> tuple[Judge, ChatClient]:
     """`provider:name` is DeepEval's faithfulness (three calls); `rubric:provider:name` is
-    the one-call rubric judge on that model (relevancy still DeepEval's)."""
-    from sre_evals.answers.rubric_judge import PREFIX, RubricJudge
+    the rubric judge on that model, `rubric:A+B` with model B for its claim checks
+    (relevancy still DeepEval's on A)."""
+    from sre_evals.answers.rubric_judge import PREFIX, VERIFIER_SEP, RubricJudge
 
-    client = _client(spec.removeprefix(PREFIX))
+    main, _, check = spec.removeprefix(PREFIX).partition(VERIFIER_SEP)
+    if check and not spec.startswith(PREFIX):
+        raise typer.BadParameter(f"{spec!r}: a checking model is for rubric judges")
+    client = _client(main)
     deepeval = build_judge(client)
     if spec.startswith(PREFIX):
-        return RubricJudge(client, deepeval), client
+        verifier = _client(check) if check else None
+        return RubricJudge(client, deepeval, verifier=verifier), client
     return deepeval, client
 
 
