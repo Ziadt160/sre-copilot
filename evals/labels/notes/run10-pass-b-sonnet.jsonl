@@ -1,0 +1,28 @@
+{"n": 1, "item_id": "fac-0030", "label": "supported", "claims_total": 3, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 2, "item_id": "fac-0047", "label": "partly", "claims_total": 4, "claims_unsupported": 1, "unsupported": ["'This enables the Windows networking stack to handle FQDN resolution for SMB shares' - source does not say what the key does"], "confidence": "medium", "note": "Gap is an explanatory sentence; core fix fully supported"}
+{"n": 3, "item_id": "exs-0031", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 4, "item_id": "exs-0030", "label": "supported", "claims_total": 5, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 5, "item_id": "fac-0027", "label": "supported", "claims_total": 1, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 6, "item_id": "exs-0002", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 7, "item_id": "exs-0016", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "'that would be applied' is a mild paraphrase of 'Output the patch if the resource is edited'"}
+{"n": 8, "item_id": "fac-0048", "label": "supported", "claims_total": 3, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 9, "item_id": "fac-0017", "label": "supported", "claims_total": 3, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "Answer is cut off mid-sentence; 'schema requirements' is a slight embellishment"}
+{"n": 10, "item_id": "exs-0036", "label": "supported", "claims_total": 5, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "'move the rule to a more granular level' is only shown as equal-cost alongside limits"}
+{"n": 11, "item_id": "exs-0026", "label": "partly", "claims_total": 5, "claims_unsupported": 2, "unsupported": ["'OOM kill removes the packet-filtering rules' - contradicts source 1, which says the rules are NOT cleaned up", "'the rules are recreated' on restart - absent from sources"], "confidence": "medium", "note": "Final outcome (brief DNS downtime, queries sent to unhealthy local pod) is supported but the mechanism is stated backwards"}
+{"n": 12, "item_id": "fac-0013", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 13, "item_id": "fac-0011", "label": "supported", "claims_total": 5, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": ""}
+{"n": 14, "item_id": "exs-0001", "label": "supported", "claims_total": 3, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "Source 3 still lists --log-file-max-size under kubectl options, but answer is about system components and matches source 1"}
+{"n": 15, "item_id": "exs-0019", "label": "supported", "claims_total": 6, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": "Answer omits the 'from' field but states nothing false"}
+{"n": 16, "item_id": "fac-0023", "label": "supported", "claims_total": 3, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 17, "item_id": "exs-0017", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 18, "item_id": "exs-0035", "label": "supported", "claims_total": 4, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "Answer is cut off mid-sentence"}
+{"n": 19, "item_id": "fac-0021", "label": "supported", "claims_total": 5, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": ""}
+{"n": 20, "item_id": "exs-0037", "label": "supported", "claims_total": 3, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 21, "item_id": "fac-0010", "label": "supported", "claims_total": 4, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "'prevent other controllers from modifying or deleting' is a mild elaboration of 'avoid interfering'"}
+{"n": 22, "item_id": "exs-0010", "label": "supported", "claims_total": 1, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": "Answer is cut off mid-sentence"}
+{"n": 23, "item_id": "exs-0022", "label": "supported", "claims_total": 4, "claims_unsupported": 0, "unsupported": [], "confidence": "medium", "note": "schedulerName mismatch is stated as 'unschedulable' in source 5; linking it to the condition reason is a small inference"}
+{"n": 24, "item_id": "exs-0007", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 25, "item_id": "fac-0036", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 26, "item_id": "fac-0042", "label": "supported", "claims_total": 1, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 27, "item_id": "fac-0014", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
+{"n": 28, "item_id": "exs-0015", "label": "supported", "claims_total": 2, "claims_unsupported": 0, "unsupported": [], "confidence": "high", "note": ""}
