@@ -9,6 +9,7 @@ from typing import Annotated, Any
 import typer
 from rich.console import Console
 
+from sre_evals.answers.cli import app as answers_app
 from sre_evals.report import build_reports
 from sre_evals.runner import (
     check_gate,
@@ -38,6 +39,7 @@ from sre_shared.settings import REPO_ROOT, get_settings
 
 app = typer.Typer(help="Run evals and build results reports.", no_args_is_help=True)
 console = Console(highlight=False)
+app.add_typer(answers_app, name="answers")
 
 DbOption = Annotated[
     str | None, typer.Option("--database-url", help="Postgres DSN (default: DATABASE_URL).")
