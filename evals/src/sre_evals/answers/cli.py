@@ -177,6 +177,42 @@ async def _run(
         await pool.close()
 
 
+@app.command("judge")
+def judge_cmd(
+    run_id: Annotated[int, typer.Option("--run", help="Answer run whose answers to judge.")],
+    judge: Annotated[str, typer.Option(help="Judge model, provider:name.")],
+    repeat: Annotated[int, typer.Option(help="Judge the same answers N times (noise).")] = 1,
+    database_url: DbOption = None,
+) -> None:
+    """Judge a stored run's answers again (no generation); one new run per repeat."""
+    from sre_evals.answers.rejudge import StoredRunError, rejudge_run
+
+    if repeat < 1:
+        raise typer.BadParameter("--repeat must be at least 1")
+    judge_obj = build_judge(_client(judge))
+    dsn = database_url or get_settings().database_url
+
+    async def go() -> None:
+        conn = await connect(dsn, autocommit=True)
+        try:
+            outcomes = await rejudge_run(conn, run_id, judge_obj, repeat=repeat)
+        except StoredRunError as e:
+            console.print(f"refused: {e}")
+            raise typer.Exit(2) from e
+        finally:
+            await conn.close()
+        for o in outcomes:
+            s = o.summary
+            f, r = s["faithfulness"], s["answer_relevancy"]
+            console.print(
+                f"run {run_id} judged by {judge} ({o.repeat}/{repeat}): run {o.run_id}  "
+                f"faithfulness {'-' if f is None else f'{f:.3f}'}  "
+                f"relevancy {'-' if r is None else f'{r:.3f}'}"
+            )
+
+    run(go())
+
+
 @app.command("label")
 def label_cmd(
     run_id: Annotated[int, typer.Option("--run", help="eval_runs.id of an answer run.")],

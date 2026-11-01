@@ -201,6 +201,9 @@ def _score_rows(run_id: int, r: ItemRun) -> list[list[Any]]:
             for c in res.context
         ],
         "stratum": r.item.stratum,
+        # The complete result, so a stored run can be judged again without regenerating
+        # (sre_evals.answers.rejudge).
+        "result": res.model_dump(mode="json"),
     }
     rows.append([run_id, iid, "answer_detail", 0, 1.0, Jsonb(detail)])
     return rows
