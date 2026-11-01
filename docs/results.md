@@ -168,3 +168,14 @@ Base experiment: `hybrid-gte-small`. Golden version: `v1-cb87f3bc8b9a4407`.
 | 32 | 256 | 52.8 | 63.6 | 400 | 1.000 | 0.855 | 0.644 | 0.800 / 0.912 | 23 | 29 |
 
 Base experiment: `dense-gte-small`. Golden version: `v1-cb87f3bc8b9a4407`.
+
+### hnsw-gte-small-repeat (hnsw)
+
+| m | ef_construction | ef_search | builds | build s | ANN recall@10 | recall@5 | MRR@10 |
+|---|---|---|---|---|---|---|---|
+| 16 | 64 | 100 | 5 | 9.5 to 17.5 | 0.974 to 0.991 | 0.855 | 0.644 |
+| 16 | 128 | 100 | 5 | 15.0 to 17.0 | 0.983 to 0.996 | 0.855 | 0.644 |
+| 32 | 64 | 100 | 5 | 21.8 to 24.7 | 0.983 to 0.997 | 0.841 to 0.855 | 0.637 to 0.644 |
+| 32 | 128 | 100 | 5 | 30.9 to 31.3 | 0.997 to 0.999 | 0.855 | 0.644 |
+
+Base experiment: `dense-gte-small`. Golden version: `v1-cb87f3bc8b9a4407`.

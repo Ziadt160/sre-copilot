@@ -60,6 +60,34 @@ What the numbers say (paired bootstrap, 95% confidence intervals, n = 69):
   the index finds 96% of the true top 10 for gte-small (0.92 at 40, no gain at 200), 98% for
   bge-m3 and 93% for bge-large.
 
+Tuning sweeps (`sre-eval sweep` and `sre-eval hnsw`; every point is in
+[`docs/results.md`](docs/results.md#sweeps), and each is also scored on two fixed halves of
+the golden set, because a point chosen and scored on the same 69 questions looks better than
+it is):
+
+- **Fusion, keyword weight 0–2 × `rrf_k` 10/60/100 (18 points): no hybrid setting beats
+  dense.**
+  - Weight 0 reproduces dense exactly (0.855), which checks the sweep itself.
+  - A small `rrf_k` matters most, because it lets each leg's top ranks dominate. The best
+    point (`rrf_k` 10, keyword weight 0.25) ties dense at 0.855 / 0.646, then wins one half
+    and loses the other (recall@5 0.829 vs 0.800, then 0.882 vs 0.912).
+  - By stratum the picture is different: the keyword leg lifts exact-string recall@5 from
+    0.758 to 0.848 (weight 0.5) and costs factual about as much. So the next experiment is to
+    use the keyword leg only for queries that contain a literal.
+- **HNSW, `m` 8/16/32 × `ef_construction` 32–256 × `ef_search` 10–400 (66 points): build
+  quality matters, search effort barely does.**
+  - Weak graphs (`m` 8, `ef_construction` ≤ 64) lose up to 3 questions. From
+    `ef_construction` 128 or `m` 32, ANN recall@10 is 0.98–1.00 and recall@5 sits at the
+    exact-scan ceiling.
+  - `ef_search` from 10 to 400 changes ANN recall by about 0.02 and quality not at all,
+    because the iterative scan keeps filtered queries full.
+  - p50 latency stays at 19–21 ms across the grid. Build time grows from 10 s to 53 s
+    (single-threaded), and index size from 54.5 MB to 64 MB at `m` 32.
+- **HNSW builds are randomised.** Five rebuilds per setting: `m` 16 / `ef_construction` 64
+  (the current index) gives ANN recall 0.974–0.991, and `ef_construction` 128 gives
+  0.983–0.996 at the same size. A single build can still lose one question (seen in one of
+  seven default builds), which is more than the CI gate's 0.01 tolerance.
+
 Limits:
 - 69 questions resolve differences of about ±0.1 recall, not finer. Questions were generated
   from single chunks, which favours dense retrieval, especially on the factual stratum.
