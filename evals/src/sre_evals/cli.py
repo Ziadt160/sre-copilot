@@ -18,7 +18,7 @@ from sre_evals.runner import (
     run_experiment,
     write_baseline,
 )
-from sre_evals.runner.engine import ANN_SAMPLE
+from sre_evals.runner.engine import ANN_EF_VALUES, ANN_SAMPLE
 from sre_evals.runner.gate import DEFAULT_BASELINE
 from sre_evals.runner.sweep import (
     SWEEP_PARAMS,
@@ -62,6 +62,14 @@ def retrieval(
     ] = False,
     ann_sample: Annotated[int, typer.Option(help="Items sampled for ANN recall.")] = ANN_SAMPLE,
     gate: Annotated[bool, typer.Option("--gate", help="Fail on a drop vs the baseline.")] = False,
+    exact: Annotated[
+        bool,
+        typer.Option(
+            "--exact",
+            help="Dense leg as an exact scan: deterministic metrics (the CI gate); stored as"
+            " kind retrieval-exact, so the README table keeps the index-backed runs.",
+        ),
+    ] = False,
     baseline: Annotated[Path, typer.Option(help="Baseline file for --gate.")] = DEFAULT_BASELINE,
     concurrency: Annotated[
         int,
@@ -99,7 +107,7 @@ def retrieval(
     gversion = golden_version(path)
     dsn = database_url or get_settings().database_url
     failed = run(_run_all(dsn, selected, scorable, items, loop, gversion, ann_recall, ann_sample,
-                          concurrency, gate, base))  # fmt: skip
+                          concurrency, gate, base, exact))  # fmt: skip
     if failed:
         raise typer.Exit(1)
 
@@ -116,6 +124,7 @@ async def _run_all(
     concurrency: int,
     gate: bool,
     base: dict[str, Any],
+    exact: bool = False,
 ) -> bool:
     from sre_core.retrieval.service import Retriever
 
@@ -132,6 +141,8 @@ async def _run_all(
             outcome = await run_experiment(
                 cfg, all_items, retriever, conn, loop=loop, golden_version=gversion,
                 concurrency=concurrency, ann=ann, ann_sample=ann_sample,
+                ann_ef_values=sorted({*ANN_EF_VALUES, cfg.ef_search}),
+                kind="retrieval-exact" if exact else "retrieval", exact=exact,
             )  # fmt: skip
             s = outcome.summary
             console.print(
@@ -356,17 +367,22 @@ def report(
 def baseline_cmd(
     from_run: Annotated[int, typer.Option("--from-run", help="eval_runs.id to freeze.")],
     out: Annotated[Path, typer.Option(help="Baseline file.")] = DEFAULT_BASELINE,
+    ann_floor: Annotated[
+        float | None,
+        typer.Option(help="Minimum ANN recall@10 at the run's ef_search for every gated run."),
+    ] = None,
     database_url: DbOption = None,
 ) -> None:
-    """Write the gate baseline from a finished run."""
+    """Write the gate baseline from a finished run (an --exact run for a deterministic gate)."""
 
     async def go() -> dict[str, Any]:
         conn = await connect(database_url or get_settings().database_url, autocommit=True)
         try:
             row = await (
                 await conn.execute(
-                    "select id, experiment, stamps, golden_version, corpus_version_id, summary"
-                    " from public.eval_runs where id = %s and kind = 'retrieval' and status = 'done'",
+                    "select id, experiment, config, stamps, golden_version, corpus_version_id,"
+                    " summary from public.eval_runs where id = %s"
+                    " and kind in ('retrieval', 'retrieval-exact') and status = 'done'",
                     [from_run],
                 )
             ).fetchone()
@@ -382,6 +398,7 @@ def baseline_cmd(
             git_sha=row["stamps"].get("git_sha", "unknown"),
             corpus_version_id=row["corpus_version_id"],
             config_hash=row["stamps"].get("config_hash", ""),
+            ann_floor=(int(row["config"]["ef_search"]), ann_floor) if ann_floor else None,
         )
 
     data = run(go())

@@ -120,12 +120,15 @@ async def _retrieve_all(
     retriever: RetrieverLike,
     claims: Claims,
     concurrency: int,
+    exact: bool = False,
 ) -> list[_ItemRun]:
     sem = asyncio.Semaphore(max(1, concurrency))
 
     async def one(item: GoldenItem) -> _ItemRun:
         async with sem:
-            result = await retriever.retrieve(cfg.request_for(item.question, item.filters), claims)
+            result = await retriever.retrieve(
+                cfg.request_for(item.question, item.filters), claims, exact=exact
+            )
         scores = score_item(
             result.chunks,
             item.gold_passages,
@@ -240,11 +243,13 @@ async def run_experiment(
     claims: Claims = ANONYMOUS,
     kind: str = "retrieval",
     extra: Mapping[str, Any] | None = None,
+    exact: bool = False,
 ) -> RunOutcome:
     """Run `cfg` on every item that has gold passages and store the run.
 
     `kind` other than "retrieval" (a sweep point) keeps the run out of the README table;
     `extra` is merged into the stored summary (sweep name, parameters, index build facts).
+    `exact` makes the dense leg an exact scan (deterministic; used by the CI gate).
     A retrieval error stores a `failed` run (no scores) and re-raises.
     """
     scorable = [i for i in items if i.gold_passages]
@@ -258,8 +263,10 @@ async def run_experiment(
         # Untimed warm-up: loads the query embedder, fills the pool and the database caches,
         # so latency covers steady-state queries only.
         for item in scorable[:WARMUP_QUERIES]:
-            await retriever.retrieve(cfg.request_for(item.question, item.filters), claims)
-        runs = await _retrieve_all(cfg, scorable, retriever, claims, concurrency)
+            await retriever.retrieve(
+                cfg.request_for(item.question, item.filters), claims, exact=exact
+            )
+        runs = await _retrieve_all(cfg, scorable, retriever, claims, concurrency, exact)
         ann_by_item: dict[str, dict[int, float]] = {}
         if ann and cfg.uses_dense and scorable:
             ann_by_item = await _ann_recall(
@@ -274,6 +281,7 @@ async def run_experiment(
         raise
 
     summary = summarize(runs, cfg, len(items))
+    summary["exact"] = exact
     summary.update(extra or {})
     if ann_by_item:
         efs = sorted({ef for v in ann_by_item.values() for ef in v})
