@@ -137,6 +137,45 @@ def _hnsw_key(r: dict[str, Any]) -> tuple[int, int, int]:
     return (int(p["m"]), int(p["ef_construction"]), int(p["ef_search"]))
 
 
+def _span(values: Sequence[float], fmt: str = "{:.3f}") -> str:
+    lo, hi = min(values), max(values)
+    return fmt.format(lo) if lo == hi else f"{fmt.format(lo)} to {fmt.format(hi)}"
+
+
+def _repeat_table(runs: Sequence[dict[str, Any]]) -> list[str]:
+    """Build-to-build variance: one row per (m, ef_construction, ef_search), min to max over builds."""
+    groups: dict[tuple[int, int, int], list[dict[str, Any]]] = {}
+    for r in runs:
+        groups.setdefault(_hnsw_key(r), []).append(r)
+    rows = []
+    for (m, efc, ef), group in sorted(groups.items()):
+        anns = [
+            next(iter(g["summary"]["ann_recall"].values()))
+            for g in group
+            if g["summary"].get("ann_recall")
+        ]
+        rows.append([
+            str(m), str(efc), str(ef), str(len(group)),
+            _span([g["summary"].get("hnsw", {}).get("build_seconds", 0.0) for g in group], "{:.1f}"),
+            _span(anns) if anns else "-",
+            _span([g["summary"]["recall@5"] for g in group]),
+            _span([g["summary"]["mrr@10"] for g in group]),
+        ])  # fmt: skip
+    return _table(
+        [
+            "m",
+            "ef_construction",
+            "ef_search",
+            "builds",
+            "build s",
+            "ANN recall@10",
+            "recall@5",
+            "MRR@10",
+        ],
+        rows,
+    )
+
+
 def render_sweeps(sweeps: Sequence[dict[str, Any]]) -> list[str]:
     """Sections for parameter sweeps (kind `sweep`) and HNSW build sweeps (kind `hnsw`)."""
     if not sweeps:
@@ -157,6 +196,14 @@ def render_sweeps(sweeps: Sequence[dict[str, Any]]) -> list[str]:
         kind = runs[0]["kind"]
         lines += ["", f"### {name} ({kind})", ""]
         rows: list[list[str]] = []
+        if kind == "hnsw" and any("build" in r["summary"]["params"] for r in runs):
+            lines += _repeat_table(runs)
+            base = str(runs[0]["experiment"]).split("[", 1)[0]
+            lines += [
+                "",
+                f"Base experiment: `{base}`. Golden version: `{runs[0]['golden_version']}`.",
+            ]
+            continue
         if kind == "hnsw":
             for r in sorted(runs, key=_hnsw_key):
                 s, h = r["summary"], r["summary"].get("hnsw", {})

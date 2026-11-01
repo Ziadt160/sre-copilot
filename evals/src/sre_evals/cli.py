@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -231,11 +232,19 @@ def hnsw(
     m: Annotated[str, typer.Option("--m", help="Comma-separated m values.")] = "8,16,32",
     ef_construction: Annotated[str, typer.Option(help="Comma-separated values.")] = "32,64,128,256",
     ef_search: Annotated[str, typer.Option(help="Comma-separated values.")] = "20,40,100,200",
+    repeat: Annotated[
+        int,
+        typer.Option(
+            help="Builds per (m, ef_construction); above 1 measures build-to-build variance."
+        ),
+    ] = 1,
     golden: Annotated[str, typer.Option(help="Golden set directory under evals/golden.")] = "v1",
     database_url: DbOption = None,
 ) -> None:
     """Rebuild the model's HNSW index for each (m, ef_construction), measure quality, ANN recall
-    and latency at each ef_search (kind `hnsw`), then restore the migration's index."""
+    and latency at each ef_search (kind `hnsw`), then restore the migration's index. With
+    --repeat N each combination is built N times (sweep `hnsw-<model>-repeat`): HNSW builds
+    are randomised, so the same parameters give slightly different graphs."""
     from sre_shared.embed.base import SPECS
 
     if model not in SPECS:
@@ -255,6 +264,8 @@ def hnsw(
                 continue
             builds.append((mv, efc))
     efs = _ints(ef_search, "--ef-search")
+    if repeat < 1:
+        raise typer.BadParameter("--repeat must be at least 1")
     items, scorable, gversion = _scorable(golden)
     dsn = database_url or get_settings().database_url
 
@@ -266,21 +277,24 @@ def hnsw(
         conn = await connect(dsn, autocommit=True)
         try:
             retriever = Retriever(pool)
-            for mv, efc in builds:
+            sweep_name = f"hnsw-{model}" if repeat == 1 else f"hnsw-{model}-repeat"
+            for (mv, efc), build_no in itertools.product(builds, range(1, repeat + 1)):
                 info = await build_hnsw(conn, name, mv, efc)
                 console.print(
                     f"built m={mv} ef_construction={efc}: {info['build_seconds']:.1f} s,"
                     f" {info['index_mb']:.1f} MB (single-threaded)"
                 )
                 for ef in efs:
-                    params = {"m": mv, "ef_construction": efc, "ef_search": ef}
+                    params: dict[str, int] = {"m": mv, "ef_construction": efc, "ef_search": ef}
+                    if repeat > 1:
+                        params["build"] = build_no
                     cfg = derive(base, {"ef_search": ef}).model_copy(
                         update={"name": point_name(base.name, params)}
                     )
                     outcome = await run_experiment(
                         cfg, items, retriever, conn, loop="local", golden_version=gversion,
                         ann=True, ann_sample=len(scorable), ann_ef_values=[ef], kind="hnsw",
-                        extra={"sweep": f"hnsw-{model}", "params": params, "hnsw": info},
+                        extra={"sweep": sweep_name, "params": params, "hnsw": info},
                     )  # fmt: skip
                     _print_point(cfg.name, outcome.run_id, outcome.summary)
         finally:

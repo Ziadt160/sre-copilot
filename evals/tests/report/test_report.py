@@ -179,3 +179,22 @@ def test_render_sweeps_tables() -> None:
     )
     assert "| 8 | 32 | 3.2 | 41.0 | 40 | 0.950 | 0.800 | 0.600 | - | 9 | 12 |" in text
     assert render_sweeps([]) == []
+
+
+def test_render_sweeps_summarises_repeated_builds() -> None:
+    from sre_evals.report.details import render_sweeps
+
+    def build(no: int, recall: float, ann: float) -> dict[str, Any]:
+        return {
+            "kind": "hnsw", "golden_version": "v1-x", "folds": {},
+            "experiment": f"dense-gte-small[m=16,ef_construction=64,ef_search=100,build={no}]",
+            "summary": {
+                "recall@5": recall, "mrr@10": 0.6, "ndcg@10": 0.7,
+                "latency_ms": {"p50": 9.0, "p95": 12.0}, "ann_recall": {"100": ann},
+                "sweep": "hnsw-gte-small-repeat", "hnsw": {"build_seconds": 10.0 + no},
+                "params": {"m": 16, "ef_construction": 64, "ef_search": 100, "build": no},
+            },
+        }  # fmt: skip
+
+    text = "\n".join(render_sweeps([build(1, 0.841, 0.96), build(2, 0.855, 0.98)]))
+    assert "| 16 | 64 | 100 | 2 | 11.0 to 12.0 | 0.960 to 0.980 | 0.841 to 0.855 | 0.600 |" in text
