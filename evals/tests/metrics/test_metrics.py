@@ -272,7 +272,13 @@ def test_ann_recall() -> None:
     assert ann_recall([1, 2, 9, 4], [1, 2, 3, 4]) == 0.75
     assert ann_recall([4, 3, 2, 1], [1, 2, 3, 4]) == 1.0  # order is irrelevant
     assert ann_recall([], [1, 2]) == 0.0
-    assert ann_recall([1], []) == 1.0  # nothing to miss
+    # Exact list empty (no rows pass the filter): undefined, excluded from means.
+    assert ann_recall([1], []) is None
+    assert ann_recall([], []) is None
+    # index=[1,2,3,4] vs exact=[1,2,3,4] -> 4/4 = 1.0.
+    assert ann_recall([1, 2, 3, 4], [1, 2, 3, 4]) == 1.0
+    # index=[1,2] vs exact=[1,2,3,4]: divides by |exact| = 4 -> 2/4 = 0.5.
+    assert ann_recall([1, 2], [1, 2, 3, 4]) == 0.5
 
 
 def test_score_item_matches_individual_functions() -> None:

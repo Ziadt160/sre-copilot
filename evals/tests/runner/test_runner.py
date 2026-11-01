@@ -150,6 +150,31 @@ async def test_ann_recall_vs_exact(db: Any) -> None:
     assert row["value"] == pytest.approx(0.6)
 
 
+async def test_ann_recall_excludes_queries_with_empty_exact(db: Any) -> None:
+    await create_corpus_version(db)
+
+    def ann_script(req: RetrievalRequest, exact: bool) -> tuple[list[Any], float]:
+        if not req.use_keyword and req.k == 10:
+            if req.query == "question exa-0001":  # nothing passes this item's filters
+                return [], 1.0
+            # Exact top 4 is {1..4}; the index returns only {1, 2} -> 2/4 = 0.5.
+            return [chunk(i, "x") for i in ([1, 2, 3, 4] if exact else [1, 2])], 1.0
+        return script(req, exact)
+
+    out = await run_experiment(
+        cfg(legs=["dense"]),
+        ITEMS[:2],
+        FakeRetriever(ann_script),
+        db,
+        loop="local",
+        golden_version="v1",
+        ann=True,
+    )
+    # The empty-exact item is excluded (not counted as 1.0): mean = 0.5, sample = 1.
+    assert out.summary["ann_recall"] == pytest.approx({"40": 0.5, "100": 0.5, "200": 0.5})
+    assert out.summary["ann_sample"] == 1
+
+
 def test_all_experiment_configs_load() -> None:
     exps = load_experiments()
     assert set(exps) >= {

@@ -167,10 +167,13 @@ async def _ann_recall(
             per_ef: dict[int, float] = {}
             for ef in ef_values:
                 got = await retriever.retrieve(req(item, ef), claims)
-                per_ef[ef] = ann_recall([c.chunk_id for c in got.chunks], exact_ids)
+                value = ann_recall([c.chunk_id for c in got.chunks], exact_ids)
+                if value is not None:  # empty exact list: query excluded from the mean
+                    per_ef[ef] = value
         return item.id, per_ef
 
-    return dict(await asyncio.gather(*(one(i) for i in chosen)))
+    results = await asyncio.gather(*(one(i) for i in chosen))
+    return {iid: per_ef for iid, per_ef in results if per_ef}
 
 
 async def _insert_run(

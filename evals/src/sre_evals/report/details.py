@@ -91,7 +91,15 @@ def render_details(
     if not runs:
         return "\n".join([*lines, "_No eval runs yet._", ""])
 
-    lines += ["## All experiments", ""]
+    shas = sorted({str(r["stamps"].get("git_sha", "unknown")) for r in runs})
+    goldens = sorted({str(r["golden_version"]) for r in runs})
+    lines += [
+        f"Git SHA: {', '.join(f'`{s}`' for s in shas)}. "
+        f"Golden version: {', '.join(f'`{g}`' for g in goldens)}.",
+        "",
+        "## All experiments",
+        "",
+    ]
     rows = []
     for r in runs:
         s = r["summary"]

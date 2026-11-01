@@ -112,3 +112,4 @@ async def test_build_reports_from_runs_is_idempotent(db: Any, tmp_path: Path) ->
     md = first_details.decode()
     assert "## Per stratum" in md and "## Weight sweep" in md and "## ANN recall" in md
     assert "## Embedding models" in md and "factual" in md
+    assert "Git SHA:" in md and "Golden version: `v1-abcdef0123`" in md
