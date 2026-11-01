@@ -53,7 +53,10 @@ def main() -> None:
 
 @app.command("retrieval")
 def retrieval(
-    experiment: Annotated[str | None, typer.Option("--experiment", "-e")] = None,
+    experiment: Annotated[
+        list[str] | None,
+        typer.Option("--experiment", "-e", help="Experiment name; repeat for several."),
+    ] = None,
     all_: Annotated[bool, typer.Option("--all", help="Run every experiment.")] = False,
     golden: Annotated[
         str, typer.Option(help="Golden set directory name under evals/golden.")
@@ -88,9 +91,10 @@ def retrieval(
         raise typer.BadParameter("--loop must be local or ci")
     configs = load_experiments()
     if experiment:
-        if experiment not in configs:
-            raise typer.BadParameter(f"unknown experiment {experiment!r}; have {sorted(configs)}")
-        selected = [configs[experiment]]
+        unknown = [e for e in experiment if e not in configs]
+        if unknown:
+            raise typer.BadParameter(f"unknown experiments {unknown}; have {sorted(configs)}")
+        selected = [configs[e] for e in dict.fromkeys(experiment)]  # order kept, repeats once
     else:
         selected = list(configs.values())
 
@@ -380,6 +384,29 @@ def report(
 
     n = run(go())
     console.print(f"report written from {n} experiment run(s)")
+
+
+@app.command("compare")
+def compare_cmd(
+    base: Annotated[str, typer.Option(help="Baseline experiment.")],
+    experiment: Annotated[
+        list[str], typer.Option("--experiment", "-e", help="Experiment to compare; repeat.")
+    ],
+    kind: Annotated[str, typer.Option(help="Run kind of both sides.")] = "retrieval",
+    database_url: DbOption = None,
+) -> None:
+    """Paired bootstrap deltas and the two-halves check of the latest runs vs a baseline."""
+    from sre_evals.report.compare import compare, render
+
+    async def go() -> list[str]:
+        conn = await connect(database_url or get_settings().database_url, autocommit=True)
+        try:
+            return render(base, await compare(conn, base, experiment, kind))
+        finally:
+            await conn.close()
+
+    for line in run(go()):
+        console.print(line, markup=False, highlight=False, soft_wrap=True)
 
 
 @app.command("baseline")
