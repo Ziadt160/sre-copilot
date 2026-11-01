@@ -29,8 +29,13 @@ SWEEP_PARAMS: dict[str, type] = {
     "candidates_per_leg": int,
 }
 
-# The migration's index definition, restored after every HNSW sweep.
-HNSW_DEFAULT = (16, 64)
+# The migrations' index definitions; a sweep restores whatever definition it found instead,
+# and falls back to these only when the index was missing.
+MIGRATION_HNSW: dict[str, tuple[int, int]] = {
+    "gte-small": (16, 128),
+    "bge-large": (16, 64),
+    "bge-m3": (16, 64),
+}
 # pgvector limits: m in 2..100, ef_construction in 4..1000 and at least 2 * m.
 M_RANGE = (2, 100)
 EF_CONSTRUCTION_RANGE = (4, 1000)
@@ -118,6 +123,20 @@ def hnsw_ddl(
         index, sql.Identifier(SPECS[model].column), sql.Literal(m), sql.Literal(ef_construction)
     )
     return drop, create
+
+
+async def current_hnsw_params(
+    conn: AsyncConnection[Any], model: EmbeddingModelName
+) -> tuple[int, int]:
+    """(m, ef_construction) of the model's index as it stands, or the migration's if absent."""
+    row = await (
+        await conn.execute(
+            "select reloptions from pg_class where relname = %s", [hnsw_index_name(model)]
+        )
+    ).fetchone()
+    opts = dict(o.split("=", 1) for o in (row["reloptions"] or [])) if row else {}
+    m_default, efc_default = MIGRATION_HNSW[model]
+    return int(opts.get("m", m_default)), int(opts.get("ef_construction", efc_default))
 
 
 async def build_hnsw(

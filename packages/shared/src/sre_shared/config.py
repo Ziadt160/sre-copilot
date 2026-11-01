@@ -67,6 +67,7 @@ class HnswConfig(BaseModel):
 
 
 class RetrievalDefaults(BaseModel):
+    mode: Literal["dense", "hybrid", "keyword"] = "dense"
     embedding_model: str = "gte-small"
     ts_config: Literal["english", "simple"] = "english"
     keyword_match: Literal["any", "all"] = "any"

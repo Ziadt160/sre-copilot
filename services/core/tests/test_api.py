@@ -34,8 +34,16 @@ async def test_search_response_shape(client: httpx.AsyncClient, corpus: Corpus) 
     top = body["chunks"][0]
     assert top["source_path"] == "content/en/docs/concepts/pods.md"
     assert {"dense_rank", "keyword_rank", "dense_similarity", "keyword_score", "score"} <= set(top)
+    assert top["keyword_rank"] is None
     assert set(body["timings_ms"]) == {"embed", "sql", "fuse", "total"}
-    assert body["request"]["use_dense"] and body["request"]["use_keyword"]
+    # No mode given: config/retrieval.yaml's default (dense, decision 29).
+    assert body["request"]["use_dense"] and not body["request"]["use_keyword"]
+
+
+async def test_explicit_hybrid_uses_both_legs(client: httpx.AsyncClient, corpus: Corpus) -> None:
+    r = await client.get("/search", params={"q": "smallest deployable unit pods", "mode": "hybrid"})
+    req = r.json()["request"]
+    assert req["use_dense"] and req["use_keyword"]
 
 
 async def test_modes(client: httpx.AsyncClient, corpus: Corpus) -> None:

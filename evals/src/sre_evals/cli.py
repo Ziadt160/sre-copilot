@@ -21,10 +21,10 @@ from sre_evals.runner import (
 from sre_evals.runner.engine import ANN_SAMPLE
 from sre_evals.runner.gate import DEFAULT_BASELINE
 from sre_evals.runner.sweep import (
-    HNSW_DEFAULT,
     SWEEP_PARAMS,
     build_hnsw,
     check_hnsw_params,
+    current_hnsw_params,
     derive,
     grid_points,
     parse_grid,
@@ -242,7 +242,7 @@ def hnsw(
     database_url: DbOption = None,
 ) -> None:
     """Rebuild the model's HNSW index for each (m, ef_construction), measure quality, ANN recall
-    and latency at each ef_search (kind `hnsw`), then restore the migration's index. With
+    and latency at each ef_search (kind `hnsw`), then restore the index as it was. With
     --repeat N each combination is built N times (sweep `hnsw-<model>-repeat`): HNSW builds
     are randomised, so the same parameters give slightly different graphs."""
     from sre_shared.embed.base import SPECS
@@ -275,6 +275,7 @@ def hnsw(
         pool = create_pool(dsn, min_size=2, max_size=2)
         await pool.open(wait=True)
         conn = await connect(dsn, autocommit=True)
+        original = await current_hnsw_params(conn, name)
         try:
             retriever = Retriever(pool)
             sweep_name = f"hnsw-{model}" if repeat == 1 else f"hnsw-{model}-repeat"
@@ -299,16 +300,16 @@ def hnsw(
                     _print_point(cfg.name, outcome.run_id, outcome.summary)
         finally:
             try:
-                restored = await build_hnsw(conn, name, *HNSW_DEFAULT)
+                restored = await build_hnsw(conn, name, *original)
                 console.print(
-                    f"restored the migration's index (m={HNSW_DEFAULT[0]},"
-                    f" ef_construction={HNSW_DEFAULT[1]}) in {restored['build_seconds']:.1f} s"
+                    f"restored the index as it was (m={original[0]},"
+                    f" ef_construction={original[1]}) in {restored['build_seconds']:.1f} s"
                 )
             except Exception:
                 console.print(
                     f"[red]the {model} HNSW index may be missing: restore it with"
-                    f" `sre-eval hnsw --model {model} --m {HNSW_DEFAULT[0]}"
-                    f" --ef-construction {HNSW_DEFAULT[1]} --ef-search 100`[/]"
+                    f" `sre-eval hnsw --model {model} --m {original[0]}"
+                    f" --ef-construction {original[1]} --ef-search 100`[/]"
                 )
                 raise
             finally:

@@ -9,9 +9,10 @@ import pytest
 from sre_evals.runner import run_experiment
 from sre_evals.runner.config import ExperimentConfig
 from sre_evals.runner.sweep import (
-    HNSW_DEFAULT,
+    MIGRATION_HNSW,
     build_hnsw,
     check_hnsw_params,
+    current_hnsw_params,
     derive,
     grid_points,
     hnsw_ddl,
@@ -82,11 +83,13 @@ async def _index_options(db: Any) -> list[str]:
 
 @pytest.mark.integration
 async def test_build_hnsw_rebuilds_and_restores(db: Any) -> None:
+    assert await current_hnsw_params(db, "gte-small") == MIGRATION_HNSW["gte-small"] == (16, 128)
     info = await build_hnsw(db, "gte-small", 8, 32)
     assert (info["m"], info["ef_construction"]) == (8, 32) and info["build_seconds"] >= 0
     assert await _index_options(db) == ["m=8", "ef_construction=32"]
-    await build_hnsw(db, "gte-small", *HNSW_DEFAULT)
-    assert await _index_options(db) == ["m=16", "ef_construction=64"]
+    assert await current_hnsw_params(db, "gte-small") == (8, 32)
+    await build_hnsw(db, "gte-small", *MIGRATION_HNSW["gte-small"])
+    assert await _index_options(db) == ["m=16", "ef_construction=128"]
 
 
 @pytest.mark.integration

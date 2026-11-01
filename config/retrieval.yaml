@@ -1,5 +1,7 @@
 # Default retrieval knobs. Every value here is to be set by an experiment on the golden set
 # (config/experiments/), not left at its default; the eval run stamps record which config ran.
+mode: dense                       # dense | hybrid | keyword (GET /search default). Decision 29:
+                                  # hybrid did not beat dense on golden v1 at any fusion setting
 embedding_model: gte-small        # gte-small | bge-large | bge-m3 (lab only for the BGE models)
 ts_config: english                # english | simple
 keyword_match: any                # any | all query terms (all: websearch_to_tsquery)
