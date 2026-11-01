@@ -6,7 +6,7 @@ infra/postgres/schema.py):
     SRE_TEST_PRIMARY_URL=postgresql://postgres:postgres@127.0.0.1:54410/sre
     SRE_TEST_REPLICA_URL=postgresql://postgres:postgres@127.0.0.1:54411/sre
 
-The tests write a tiny corpus to the lab primary and truncate it afterwards.
+The tests TRUNCATE the data tables of that database before and after (a scratch lab primary).
 """
 
 from __future__ import annotations
@@ -40,6 +40,9 @@ pytestmark = [
 ]
 
 QUERY = "Pods run containers sharing network and storage"
+_TRUNCATE = (
+    "truncate " + ", ".join(f"public.{t}" for t in DATA_TABLES) + " restart identity cascade"
+)
 DEAD_URL = "postgresql://postgres:postgres@127.0.0.1:1/sre"  # nothing listens on port 1
 
 
@@ -68,7 +71,7 @@ def _spy_pool(dsn: str) -> SpyPool:
         min_size=1,
         max_size=2,
         kwargs=real.kwargs,
-        configure=real._configure,  # noqa: SLF001
+        configure=real._configure,
         timeout=2,
         open=False,
     )
@@ -81,6 +84,7 @@ async def seeded(fake_embedder: FakeEmbedder) -> AsyncIterator[int]:
     """A tiny active corpus written on the primary and visible on the replica."""
     assert PRIMARY_URL and REPLICA_URL
     async with await connect(PRIMARY_URL, autocommit=True) as primary:
+        await primary.execute(_TRUNCATE)  # a leftover active corpus would break the new one
         vid = await create_corpus_version(primary)
         doc = FixtureDoc(
             "content/en/docs/concepts/pods.md",
@@ -106,11 +110,7 @@ async def seeded(fake_embedder: FakeEmbedder) -> AsyncIterator[int]:
         try:
             yield vid
         finally:
-            await primary.execute(
-                "truncate "
-                + ", ".join(f"public.{t}" for t in DATA_TABLES)
-                + " restart identity cascade"
-            )
+            await primary.execute(_TRUNCATE)
 
 
 async def test_reads_go_to_the_replica(seeded: int, fake_embedder: FakeEmbedder) -> None:
