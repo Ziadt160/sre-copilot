@@ -27,8 +27,16 @@ providers:
   nvidia:
     order: 4
     base_url: https://integrate.api.nvidia.com/v1
+    key_env: NVIDIA_API_KEY
     allowed_for: [user_traffic, lab_jobs]
     account: {rpm: 40}
+    # Judge candidates (larger open models than Groq hosts). NVIDIA publishes only the account
+    # rate above; tpd here is our own cap so the quota guard keeps every run bounded.
+    models:
+      moonshotai/kimi-k2.6:                 {rpm: 40, tpd: 1000000}
+      mistralai/mistral-large-4-1t-a52b:    {rpm: 40, tpd: 1000000}
+      nvidia/nemotron-3-ultra-550b-a55b:    {rpm: 40, tpd: 1000000}
+      deepseek-ai/deepseek-v4.1-flash:      {rpm: 40, tpd: 1000000}
   ollama:
     order: lab
     base_url: http://127.0.0.1:11434

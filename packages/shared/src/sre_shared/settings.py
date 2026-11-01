@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     # Model providers. Keys are optional: without them dev and CI use local Ollama.
     groq_api_key: SecretStr | None = None
     openrouter_api_key: SecretStr | None = None
+    nvidia_api_key: SecretStr | None = None  # build.nvidia.com; lab judges (decision 39)
     ollama_base_url: str = "http://127.0.0.1:11434"
 
     # Observability.
