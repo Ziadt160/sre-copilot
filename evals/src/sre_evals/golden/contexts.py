@@ -173,7 +173,7 @@ def select_contexts(
     chunks: Sequence[dict[str, Any]], stratum: PickStratum, n: int, seed: int
 ) -> list[ContextRow]:
     """Pure selection step, deterministic for (chunks, stratum, n, seed)."""
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # noqa: S311  (selection, not security)
     candidates: list[ContextRow] = []
     for ch in chunks:
         base = {k: ch[k] for k in ("chunk_key", "source_path", "k8s_version", "url", "title")}
