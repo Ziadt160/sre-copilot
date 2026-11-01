@@ -113,3 +113,23 @@ async def test_build_reports_from_runs_is_idempotent(db: Any, tmp_path: Path) ->
     assert "## Per stratum" in md and "## Weight sweep" in md and "## ANN recall" in md
     assert "## Embedding models" in md and "factual" in md
     assert "Git SHA:" in md and "Golden version: `v1-abcdef0123`" in md
+
+
+async def test_storage_stats_reads_the_ingest_embedding_seconds(
+    db: Any, fake_embedder: Any
+) -> None:
+    """Found in the lab: the report looked for `embed_seconds`, the ingest writes
+    `stats.embedding.<model>.seconds`, so the ingest-time column was always empty."""
+    from sre_evals.report.details import storage_stats
+    from sre_shared.testing.seed import FixtureDoc, insert_docs
+
+    vid = await create_corpus_version(db)
+    doc = FixtureDoc("content/en/docs/a.md", VER, "A", [(["S"], "enough words for one chunk")])
+    await insert_docs(db, [doc], corpus_version_id=vid, embedders=[fake_embedder])
+    await db.execute(
+        "update public.corpus_versions set stats = %s::jsonb where id = %s",
+        ['{"embedding": {"gte-small": {"seconds": 12.5, "embedded": 1}}}', vid],
+    )
+    out = await storage_stats(db, vid)
+    assert out["gte-small"]["vectors"] == 1
+    assert out["gte-small"]["ingest_seconds"] == 12.5

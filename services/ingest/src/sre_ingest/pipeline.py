@@ -179,6 +179,8 @@ def run_ingest(
                 "limit_docs": limit_docs,
             },
         }
+        if not created:
+            result.stats = store.merge_rerun_stats(store.version_stats(conn, cv), result.stats)
         store.mark_ready(conn, cv, done_models, result.stats)
         if activate:
             store.activate(conn, cv)

@@ -87,7 +87,9 @@ def test_idempotent_rerun_adds_nothing(dsn: str, cfg: CorpusConfig, tmp_path: Pa
     assert rep["unknown_shortcodes"] == {"widget": 1, "gizmo": 1}
     assert rep["status"] == "ready"
     assert rep["embedding_models"] == ["gte-small"]
-    assert rep["embedding"]["gte-small"]["embedded"] == 0
+    # The re-run embedded nothing: the build's embedding stats stay, last_run is the re-run.
+    assert rep["embedding"]["gte-small"]["embedded"] == first.chunks_total
+    assert rep["last_run"]["chunks_inserted"] == 0
     assert rep["tokens"]["max"] > 0
 
 

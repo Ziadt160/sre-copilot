@@ -168,6 +168,28 @@ def set_embeddings(
         cur.executemany(q, [(vec, cid) for cid, vec in items])
 
 
+def merge_rerun_stats(old: dict[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    """Stats for a run into an existing version: keep the build's stats (parse counts, stage
+    times, per-model embedding cost), take a model's embedding stats only when this run
+    embedded something, and record this run as `last_run`. A no-op re-run once replaced the
+    build's 96 min of gte-small embedding time with 0.08 s."""
+    if not old:
+        return new
+    out = dict(old)
+    embedding = dict(old.get("embedding") or {})
+    for name, st in (new.get("embedding") or {}).items():
+        if st.get("embedded"):
+            embedding[name] = st
+    out["embedding"] = embedding
+    out["last_run"] = new.get("last_run")
+    return out
+
+
+def version_stats(conn: Conn, cv: int) -> dict[str, Any]:
+    row = conn.execute("select stats from public.corpus_versions where id=%s", [cv]).fetchone()
+    return dict(row["stats"] or {}) if row else {}
+
+
 def mark_ready(
     conn: Conn, cv: int, models: Sequence[str], stats: dict[str, Any], sources: str | None = None
 ) -> None:

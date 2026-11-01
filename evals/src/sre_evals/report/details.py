@@ -28,9 +28,9 @@ async def latest_runs(conn: AsyncConnection[Any]) -> list[dict[str, Any]]:
 async def storage_stats(
     conn: AsyncConnection[Any], corpus_version_id: int | None
 ) -> dict[str, dict[str, Any]]:
-    """Per model: MB used by its vector column (sum of pg_column_size), vector count, and
-    ingest seconds if the corpus stats carry them (`embed_seconds` or `ingest_seconds` keyed
-    by model name)."""
+    """Per model: MB used by its vector column (sum of pg_column_size), vector count, and the
+    embedding seconds the ingest recorded (`stats.embedding.<model>.seconds`, as written by
+    sre_ingest; `embed_seconds` / `ingest_seconds` keyed by model are also read)."""
     if corpus_version_id is None:
         return {}
     crow = await (
@@ -53,11 +53,14 @@ async def storage_stats(
         if not row["n"]:
             continue
         seconds = None
+        embedding = stats.get("embedding")
+        if isinstance(embedding, dict) and isinstance(embedding.get(name), dict):
+            raw = embedding[name].get("seconds")
+            seconds = float(raw) if isinstance(raw, int | float) else None
         for key in ("embed_seconds", "ingest_seconds"):
             per_model = stats.get(key)
-            if isinstance(per_model, dict) and name in per_model:
+            if seconds is None and isinstance(per_model, dict) and name in per_model:
                 seconds = float(per_model[name])
-                break
         out[name] = {
             "vectors": int(row["n"]),
             "mb": int(row["bytes"]) / 1_000_000,
@@ -222,19 +225,23 @@ def render_details(
                     _f(h["mrr@10"]) if h else "-",
                     f"{st['mb']:.1f}" if st else "-",
                     f"{secs:.0f}" if secs is not None else "-",
+                    SPECS[model].backend,
                 ]
             )
         lines += _table(
             [
                 "Model", "Dims", "dense recall@5", "hybrid recall@5", "dense MRR@10",
-                "hybrid MRR@10", "vector column MB", "ingest s",
+                "hybrid MRR@10", "vector column MB", "embed s", "embed backend",
             ],
             rows,
         )  # fmt: skip
         lines += [
             "",
             "Vector column MB is the sum of `pg_column_size` over the model's halfvec column "
-            "for the corpus version of the run (index size not included).",
+            "for the corpus version of the run (index size not included). Embed s is the "
+            "document-embedding time the ingest recorded for the whole corpus; `onnx` runs on "
+            "the CPU and `sentence-transformers` on the GPU embedding server, so the column "
+            "compares machines as much as models.",
         ]
     else:
         lines.append("_No dense experiments yet._")
