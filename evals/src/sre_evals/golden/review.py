@@ -2,6 +2,8 @@
 
 `ReviewSession` holds the state and every decision; `run_review` is the thin key loop. Both
 input and the clock are injectable so tests drive a whole session with scripted keys.
+`apply_decisions` feeds a decisions file through the same session methods, so a
+non-interactive review (for example by a model) obeys the same rules.
 """
 
 from __future__ import annotations
@@ -13,8 +15,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
+from pydantic import BaseModel
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.table import Table
@@ -226,6 +229,59 @@ class ReviewSession:
     def rewritten_share(self) -> float:
         acc = [i for i in self.decided.values() if i.status == "accepted"]
         return sum(i.origin == "rewritten" for i in acc) / len(acc) if acc else 0.0
+
+
+class ReviewDecision(BaseModel):
+    """One line of a decisions file: the same edits the interactive keys make."""
+
+    id: str
+    action: Literal["accept", "reject"]
+    question: str | None = None
+    expected_answer: str | None = None
+    quote: str | None = None  # verbatim sub-span of the (single) gold quote to keep
+    reason: str = ""
+
+
+@dataclass
+class ApplyReport:
+    accepted: int = 0
+    rejected: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+def apply_decisions(session: ReviewSession, decisions: list[ReviewDecision]) -> ApplyReport:
+    """Apply decisions in order. An edit the session refuses (a rewrite without the exact
+    string, a trim that is not a sub-span) leaves that item undecided and is reported."""
+    report = ApplyReport()
+    for d in decisions:
+        if d.id not in session.queue:
+            report.errors.append(f"{d.id}: not pending (unknown or already decided)")
+            continue
+        session.queue.remove(d.id)
+        session.queue.insert(0, d.id)
+        session._load_next()
+        edits = [
+            (d.question, session.set_question),
+            (d.expected_answer, session.set_answer),
+            (d.quote, session.trim_quote),
+        ]
+        refused = [
+            session.message for value, edit in edits if value is not None and not edit(value)
+        ]
+        if refused:
+            report.errors.append(f"{d.id}: {'; '.join(refused)}")
+            session.queue.append(session.queue.pop(0))
+            session._load_next()
+            continue
+        work = session._need()
+        work.notes = d.reason or work.notes
+        if d.action == "accept":
+            session.accept()
+            report.accepted += 1
+        else:
+            session.reject()
+            report.rejected += 1
+    return report
 
 
 def _locate_span(quote: str, text: str) -> str | None:

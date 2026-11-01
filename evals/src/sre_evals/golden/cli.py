@@ -15,7 +15,14 @@ from rich.table import Table
 from sre_evals.golden.contexts import pick_contexts, read_contexts, write_contexts
 from sre_evals.golden.llm import OpenAICompatLLM, parse_model_spec
 from sre_evals.golden.mirror import mirror_dataset
-from sre_evals.golden.review import ReviewSession, StdTerminal, Terminal, run_review
+from sre_evals.golden.review import (
+    ReviewDecision,
+    ReviewSession,
+    StdTerminal,
+    Terminal,
+    apply_decisions,
+    run_review,
+)
 from sre_evals.golden.synth import (
     DEFAULT_QUALITY_THRESHOLD,
     QuotaError,
@@ -160,6 +167,31 @@ def review(
     session = ReviewSession.open(in_, out, reviewer)
     run_review(session, make_terminal(), console)
     console.print(f"saved {len(session.decided)} decisions -> {out}")
+
+
+@app.command()
+def apply(
+    in_: Annotated[Path, typer.Option("--in", help="candidates JSONL")],
+    decisions: Annotated[Path, typer.Option(help="decisions JSONL (ReviewDecision per line)")],
+    out: Annotated[Path, typer.Option(help="decisions file, e.g. evals/golden/v1/items.jsonl")],
+    reviewer: Annotated[str, typer.Option(help="who decided, stored on each decision")],
+) -> None:
+    """Apply a decisions file non-interactively, with the same rules as `review`."""
+    rows = [
+        ReviewDecision.model_validate_json(line)
+        for line in decisions.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    session = ReviewSession.open(in_, out, reviewer)
+    report = apply_decisions(session, rows)
+    console.print(
+        f"accepted {report.accepted}, rejected {report.rejected}, "
+        f"rewritten share {session.rewritten_share():.0%} -> {out}"
+    )
+    for err in report.errors:
+        console.print(f"[red]{err}[/]")
+    if report.errors:
+        raise typer.Exit(1)
 
 
 @app.command()
