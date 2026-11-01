@@ -24,6 +24,7 @@ dev = [
     "import-linter>=2.1",
     "pre-commit>=4.0",
     "types-PyYAML",
+    "locust>=2.32",
 ]
 
 [tool.uv]

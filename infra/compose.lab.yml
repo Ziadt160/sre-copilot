@@ -17,3 +17,75 @@ services:
       timeout: 3s
       retries: 30
     restart: unless-stopped
+
+  # --- profile `replica`: a primary and a streaming hot standby, for the read-routing and load
+  # experiments. `docker compose -f infra/compose.lab.yml --profile replica up -d`, then
+  # `uv run python infra/postgres/schema.py` builds the schema on the primary (the standby
+  # replays it). Nothing here starts without the profile, so `testdb` is unaffected.
+  pg-primary:
+    profiles: ["replica"]
+    image: ${SRE_TEST_PG_IMAGE:-public.ecr.aws/supabase/postgres:17.11.0.006}
+    environment:
+      POSTGRES_PASSWORD: postgres
+      REPLICATION_PASSWORD: replicator
+    command: &pg-command
+      - postgres
+      - -D
+      - /etc/postgresql
+      - -c
+      - hba_file=/lab-pg/pg_hba.conf
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=5
+      - -c
+      - max_replication_slots=5
+      - -c
+      - hot_standby=on
+      - -c
+      - hot_standby_feedback=on
+      - -c
+      - wal_keep_size=256MB
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - max_connections=100
+    volumes:
+      - ./postgres:/lab-pg:ro
+      - ./postgres/primary-init.sh:/docker-entrypoint-initdb.d/zz-replication.sh:ro
+      - pg-primary-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:54410:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  pg-replica:
+    profiles: ["replica"]
+    image: ${SRE_TEST_PG_IMAGE:-public.ecr.aws/supabase/postgres:17.11.0.006}
+    depends_on:
+      pg-primary:
+        condition: service_healthy
+    environment:
+      POSTGRES_PASSWORD: postgres
+      REPLICATION_PASSWORD: replicator
+      PRIMARY_HOST: pg-primary
+    entrypoint: ["bash", "/lab-pg/replica-entrypoint.sh"]
+    command: *pg-command
+    volumes:
+      - ./postgres:/lab-pg:ro
+      - pg-replica-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:54411:5432"
+    healthcheck:
+      # Healthy once the standby accepts read-only connections and reports recovery.
+      test: ["CMD-SHELL", "psql -U postgres -h 127.0.0.1 -tAc 'select pg_is_in_recovery()' | grep -q t"]
+      interval: 5s
+      timeout: 3s
+      retries: 40
+
+volumes:
+  pg-primary-data:
+  pg-replica-data:

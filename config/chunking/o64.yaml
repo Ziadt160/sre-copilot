@@ -1,0 +1,6 @@
+# Each chunk after the first of a split section starts with the last ~64 tokens of the previous.
+name: o64
+version: "1-o64"
+max_tokens: 510
+overlap_tokens: 64
+header_in_embedding: true
