@@ -8,6 +8,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
+from sre_shared.models import AnswerConfig
 from sre_shared.settings import get_settings
 
 
@@ -66,6 +67,24 @@ class HnswConfig(BaseModel):
     max_scan_tuples: int = 20000
 
 
+class RouteConfig(BaseModel):
+    use_dense: bool = True
+    use_keyword: bool = False
+    w_dense: float = 1.0
+    w_keyword: float = 1.0
+    rrf_k: int = 60
+
+
+class RouterConfig(BaseModel):
+    """Per-query-type retrieval (design doc: "the router flags exact-string questions and shifts
+    weight to the keyword leg; conceptual questions lean dense")."""
+
+    literal: RouteConfig = Field(
+        default_factory=lambda: RouteConfig(use_keyword=True, w_keyword=0.5, rrf_k=10)
+    )
+    default: RouteConfig = Field(default_factory=RouteConfig)
+
+
 class RetrievalDefaults(BaseModel):
     mode: Literal["dense", "hybrid", "keyword"] = "dense"
     embedding_model: str = "gte-small"
@@ -76,6 +95,7 @@ class RetrievalDefaults(BaseModel):
     rrf_k: int = 60
     weights: dict[str, float] = Field(default_factory=lambda: {"dense": 1.0, "keyword": 1.0})
     hnsw: HnswConfig = Field(default_factory=HnswConfig)
+    router: RouterConfig = Field(default_factory=RouterConfig)
 
 
 def load_retrieval_defaults(config_dir: Path | None = None) -> RetrievalDefaults:
@@ -106,3 +126,10 @@ class CorpusConfig(BaseModel):
 
 def load_corpus_config(config_dir: Path | None = None) -> CorpusConfig:
     return CorpusConfig.model_validate(_load_yaml("corpus.yaml", config_dir))
+
+
+# --- answer.yaml ------------------------------------------------------------------
+
+
+def load_answer_config(config_dir: Path | None = None) -> AnswerConfig:
+    return AnswerConfig.model_validate(_load_yaml("answer.yaml", config_dir))

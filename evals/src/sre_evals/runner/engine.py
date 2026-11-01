@@ -214,6 +214,20 @@ async def _insert_run(
     return int(row["id"] if isinstance(row, dict) else row[0])
 
 
+async def resolve_corpus(conn: AsyncConnection[Any], label: str) -> int:
+    """The newest ready or active corpus version with this label."""
+    row = await (
+        await conn.execute(
+            "select id from public.corpus_versions where label = %s"
+            " and status in ('ready', 'active') order by id desc limit 1",
+            [label],
+        )
+    ).fetchone()
+    if row is None:
+        raise LookupError(f"no ready or active corpus version labelled {label!r}")
+    return int(row["id"])
+
+
 async def _chunker_version(conn: AsyncConnection[Any], corpus_version_id: int | None) -> str | None:
     if corpus_version_id is None:
         return None
@@ -253,6 +267,10 @@ async def run_experiment(
     A retrieval error stores a `failed` run (no scores) and re-raises.
     """
     scorable = [i for i in items if i.gold_passages]
+    if cfg.corpus_version and cfg.resolved_corpus_version_id is None:
+        cfg = cfg.model_copy(
+            update={"resolved_corpus_version_id": await resolve_corpus(conn, cfg.corpus_version)}
+        )
     stamps = VersionStamps(
         config_hash=config_hash(cfg),
         embedding_model=cfg.embedding_model,

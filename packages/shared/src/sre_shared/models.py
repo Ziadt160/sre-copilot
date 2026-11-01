@@ -124,6 +124,17 @@ class RetrievalRequest(BaseModel):
     use_dense: bool = True
     use_keyword: bool = True
     ts_config: TsConfig = "english"
+    route_by_query_type: bool = Field(
+        default=False,
+        description="pick legs/weights per query: a literal (error, flag, field path) uses the"
+        " `router.literal` route in config/retrieval.yaml, anything else `router.default`",
+    )
+    rerank_candidates: int | None = Field(
+        default=None,
+        ge=1,
+        le=200,
+        description="rerank this many fused candidates before keeping k (None = no reranker)",
+    )
     keyword_match: KeywordMatch = Field(
         default="any", description="any (OR of query terms, ranked) | all (every term must match)"
     )
@@ -173,10 +184,74 @@ class RetrievalResult(BaseModel):
     request: RetrievalRequest
     corpus_version_id: int
     chunks: list[RetrievedChunk]
-    timings_ms: dict[str, float] = Field(description="embed, sql, fuse, total")
+    timings_ms: dict[str, float] = Field(description="embed, sql, fuse, total (+ rerank)")
+    route: str | None = Field(default=None, description="router decision when routing was on")
+    reranked: bool = False
 
 
 # --- golden set --------------------------------------------------------------------------
+
+# --- answers -----------------------------------------------------------------------------
+
+CompressionMode = Literal["none", "sentence"]
+
+
+class AnswerConfig(BaseModel):
+    """Answer-path knobs. Defaults live in config/answer.yaml (`load_answer_config`); every
+    value is to be set by an experiment, and eval runs stamp the config they used."""
+
+    model: str = Field(
+        default="groq:openai/gpt-oss-20b",
+        description="provider:name, see sre_shared.llm.parse_model_spec",
+    )
+    k: int = Field(default=5, ge=1, le=20, description="chunks given to the model")
+    relevance_floor: float = Field(
+        default=0.0,
+        description="abstain when the best chunk's dense similarity is below this",
+    )
+    max_tokens: int = Field(default=512, ge=16, le=4096)
+    temperature: float = Field(default=0.0, ge=0.0, le=2.0)
+    compression: CompressionMode = "none"
+    context_token_budget: int = Field(default=2500, ge=100, description="tokens of chunk text")
+    prompt_version: str = "answer-v1"
+
+
+class AnswerRequest(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    question: str = Field(min_length=1, max_length=4000)
+    filters: RetrievalFilters = Field(default_factory=lambda: RetrievalFilters())
+    config: AnswerConfig | None = Field(default=None, description="None = config/answer.yaml")
+    corpus_version_id: int | None = None
+
+
+class Citation(BaseModel):
+    """A source the answer cites: one of the chunks given to the model, by id."""
+
+    chunk_id: int
+    source_path: str
+    k8s_version: str
+    url: str
+    title: str
+
+
+class AnswerResult(BaseModel):
+    question: str
+    answer: str
+    citations: list[Citation]
+    invalid_citations: list[str] = Field(
+        default_factory=list, description="cited ids outside the given chunks (rejected)"
+    )
+    abstained: bool = False
+    context: list[RetrievedChunk] = Field(description="chunks given to the model, in order")
+    config: AnswerConfig
+    model: str
+    corpus_version_id: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    context_tokens: int = 0
+    timings_ms: dict[str, float] = Field(description="retrieve, compress, generate, total")
+
 
 Stratum = Literal[
     "factual",

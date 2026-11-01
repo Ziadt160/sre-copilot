@@ -8,6 +8,7 @@ dependencies = [
     "pydantic-settings>=2.6",
     "pyyaml>=6.0",
     "psycopg[binary]>=3.2",
+    "openai>=1.50",
     "psycopg-pool>=3.2",
     "pgvector>=0.3.6",
     "numpy>=2.0",

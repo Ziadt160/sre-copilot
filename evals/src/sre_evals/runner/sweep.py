@@ -16,7 +16,7 @@ from typing import Any
 
 from psycopg import AsyncConnection, sql
 
-from sre_evals.runner.config import ExperimentConfig
+from sre_evals.runner.config import ExperimentConfig, RerankConfig
 from sre_shared.embed.base import SPECS
 from sre_shared.models import EmbeddingModelName
 
@@ -27,6 +27,7 @@ SWEEP_PARAMS: dict[str, type] = {
     "rrf_k": int,
     "ef_search": int,
     "candidates_per_leg": int,
+    "rerank_candidates": int,
 }
 
 # The migrations' index definitions; a sweep restores whatever definition it found instead,
@@ -89,6 +90,10 @@ def derive(base: ExperimentConfig, params: dict[str, float | int]) -> Experiment
             weights.dense = float(value)
         elif key == "w_keyword":
             weights.keyword = float(value)
+        elif key == "rerank_candidates":
+            rerank = base.rerank.model_copy() if base.rerank else RerankConfig()
+            rerank.candidates = int(value)
+            update["rerank"] = rerank
         else:
             update[key] = value
     update["weights"] = weights

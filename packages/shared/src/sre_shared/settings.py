@@ -51,6 +51,8 @@ class Settings(BaseSettings):
 
     # Postgres. Lab default is the local Supabase stack started with `npx supabase start`.
     database_url: str = "postgresql://postgres:postgres@127.0.0.1:54322/postgres"
+    # Lab only: retrieval reads go here; writes and everything else stay on database_url.
+    database_replica_url: str | None = None
     db_pool_min: int = 1
     db_pool_max: int = 5
 

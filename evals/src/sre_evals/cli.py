@@ -126,7 +126,6 @@ async def _run_all(
     base: dict[str, Any],
     exact: bool = False,
 ) -> bool:
-    from sre_core.retrieval.service import Retriever
 
     # Open every connection before timing: a connect inside a timed query (the lab's port
     # forward drops some) showed up as multi-second latency outliers.
@@ -136,8 +135,9 @@ async def _run_all(
     conn = await connect(dsn, autocommit=True)
     failed = False
     try:
-        retriever = Retriever(pool)
+        retrievers: dict[str | None, Any] = {}
         for cfg in selected:
+            retriever = retriever_for(pool, cfg, retrievers)
             outcome = await run_experiment(
                 cfg, all_items, retriever, conn, loop=loop, golden_version=gversion,
                 concurrency=concurrency, ann=ann, ann_sample=ann_sample,
@@ -165,6 +165,17 @@ async def _run_all(
         await conn.close()
         await pool.close()
     return failed
+
+
+def retriever_for(pool: Any, cfg: Any, cache: dict[str | None, Any]) -> Any:
+    """One Retriever per reranker model, so experiments without a reranker never load one."""
+    from sre_core.retrieval.rerank import RemoteReranker
+    from sre_core.retrieval.service import Retriever
+
+    key = cfg.rerank.model if cfg.rerank else None
+    if key not in cache:
+        cache[key] = Retriever(pool, reranker=RemoteReranker(key) if key else None)
+    return cache[key]
 
 
 def _scorable(golden: str) -> tuple[list[GoldenItem], list[GoldenItem], str]:
@@ -213,15 +224,15 @@ def sweep(
     dsn = database_url or get_settings().database_url
 
     async def go() -> None:
-        from sre_core.retrieval.service import Retriever
 
         pool = create_pool(dsn, min_size=2, max_size=2)
         await pool.open(wait=True)
         conn = await connect(dsn, autocommit=True)
         try:
-            retriever = Retriever(pool)
+            retrievers: dict[str | None, Any] = {}
             for params in points:
                 cfg = derive(configs[base], params)
+                retriever = retriever_for(pool, cfg, retrievers)
                 outcome = await run_experiment(
                     cfg, items, retriever, conn, loop="local", golden_version=gversion,
                     ann=ann_recall, ann_sample=len(scorable), ann_ef_values=[cfg.ef_search],

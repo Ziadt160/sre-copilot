@@ -27,6 +27,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from sre_shared.models import (
+    AnswerConfig,
     EmbeddingModelName,
     IterativeScan,
     KeywordMatch,
@@ -49,6 +50,13 @@ class Weights(BaseModel):
 
     dense: float = Field(default=1.0, ge=0)
     keyword: float = Field(default=1.0, ge=0)
+
+
+class RerankConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str = "BAAI/bge-reranker-base"
+    candidates: int = Field(default=20, ge=1, le=200, description="fused candidates reranked")
 
 
 class ExperimentConfig(BaseModel):
@@ -92,6 +100,14 @@ class ExperimentConfig(BaseModel):
     def max_k(self) -> int:
         return max(self.k)
 
+    # Phase 2 knobs. `corpus_version` is a corpus label (e.g. a chunking variant); the
+    # runner resolves it to `resolved_corpus_version_id` so variants need no activation.
+    corpus_version: str | None = None
+    resolved_corpus_version_id: int | None = Field(default=None, exclude=True)
+    route_by_query_type: bool = False
+    rerank: RerankConfig | None = None
+    answer: AnswerConfig | None = None
+
     def request_for(
         self, query: str, filters: RetrievalFilters | None, **overrides: object
     ) -> RetrievalRequest:
@@ -111,6 +127,9 @@ class ExperimentConfig(BaseModel):
             "rrf_k": self.rrf_k,
             "ef_search": self.ef_search,
             "iterative_scan": self.iterative_scan,
+            "route_by_query_type": self.route_by_query_type,
+            "rerank_candidates": self.rerank.candidates if self.rerank else None,
+            "corpus_version_id": self.resolved_corpus_version_id,
         }
         fields.update(overrides)
         return RetrievalRequest.model_validate(fields)

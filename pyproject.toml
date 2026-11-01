@@ -121,8 +121,8 @@ source_modules = ["sre_ingest"]
 forbidden_modules = ["sre_core", "sre_evals"]
 
 [[tool.importlinter.contracts]]
-name = "core layers: api on top of retrieval"
+name = "core layers: api, agent, answer, retrieval"
 type = "layers"
-layers = ["sre_core.api", "sre_core.agent", "sre_core.retrieval"]
+layers = ["sre_core.api", "sre_core.agent", "sre_core.answer", "sre_core.retrieval"]
 containers = []
 exhaustive = false

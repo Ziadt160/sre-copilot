@@ -16,12 +16,17 @@ Endpoints
               -> {"dims", "count", "dtype": "float32", "data": base64 little-endian row-major,
                   "truncated": int}
     POST /count  {"hf_id", "revision", "texts", "max_seq_length"} -> {"counts": [...]}
+    POST /rerank {"hf_id", "revision", "query", "texts", "max_length", "batch_size"}
+              -> {"scores": [...]}   cross-encoder relevance, one per text, comparable within
+                                     one call (sre_core.retrieval.rerank.RemoteReranker)
+    POST /unload {} -> {"unloaded": [...]}   frees VRAM before Ollama work (8 GB card)
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import gc
 import json
 import sys
 import threading
@@ -31,9 +36,10 @@ from typing import Any
 
 import numpy as np
 import torch
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import CrossEncoder, SentenceTransformer
 
 _models: dict[tuple[str, str], SentenceTransformer] = {}
+_rerankers: dict[tuple[str, str], CrossEncoder] = {}
 # One model load or batch at a time. transformers flips torch's global default dtype while it
 # loads, so a load overlapping another load or a batch left a model with mixed half/float
 # weights ("mat1 and mat2 must have the same dtype"), found when 4 eval workers hit a cold server.
@@ -99,6 +105,55 @@ def _count(req: dict[str, Any]) -> dict[str, Any]:
         return {"counts": _token_counts(model, req["texts"])}
 
 
+def _reranker(hf_id: str, revision: str, max_length: int) -> CrossEncoder:
+    """Load once per (model, revision), from the local cache only. Call with `_gpu_lock` held."""
+    key = (hf_id, revision)
+    model = _rerankers.get(key)
+    if model is None:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        kwargs: dict[str, Any] = {"dtype": torch.float16} if device == "cuda" else {}
+        t0 = time.perf_counter()
+        model = CrossEncoder(
+            hf_id, revision=revision, device=device, local_files_only=True, model_kwargs=kwargs
+        )
+        print(
+            f"loaded reranker {hf_id}@{revision[:7]} on {device} in {time.perf_counter() - t0:.1f}s",
+            flush=True,
+        )
+        _rerankers[key] = model
+    model.max_length = max_length
+    return model
+
+
+def _rerank(req: dict[str, Any]) -> dict[str, Any]:
+    texts: list[str] = req["texts"]
+    with _gpu_lock:
+        model = _reranker(
+            req["hf_id"], req.get("revision", "main"), int(req.get("max_length", 512))
+        )
+        scores = (
+            model.predict(
+                [(req["query"], t) for t in texts],
+                batch_size=int(req.get("batch_size", 32)),
+                show_progress_bar=False,
+            )
+            if texts
+            else []
+        )
+    return {"scores": [float(x) for x in np.asarray(scores, dtype=np.float32).reshape(-1)]}
+
+
+def _unload(_req: dict[str, Any]) -> dict[str, Any]:
+    with _gpu_lock:
+        names = [f"{h}@{r}" for h, r in [*_models, *_rerankers]]
+        _models.clear()
+        _rerankers.clear()
+        gc.collect()  # models sit in reference cycles; collect before freeing the CUDA cache
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    return {"unloaded": names}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "sre-gpu-embed/1"
 
@@ -120,11 +175,12 @@ class Handler(BaseHTTPRequestHandler):
                 "torch": torch.__version__,
                 "sentence_transformers": sys.modules["sentence_transformers"].__version__,
                 "loaded": [f"{h}@{r}" for h, r in _models],
+                "rerankers": [f"{h}@{r}" for h, r in _rerankers],
             },
         )
 
     def do_POST(self) -> None:
-        routes = {"/embed": _embed, "/count": _count}
+        routes = {"/embed": _embed, "/count": _count, "/rerank": _rerank, "/unload": _unload}
         handler = routes.get(self.path)
         if handler is None:
             return self._send(404, {"error": "not found"})

@@ -15,3 +15,13 @@ hnsw:
   ef_search: 100                  # must be >= candidates_per_leg unless iterative scan is on
   iterative_scan: relaxed_order   # off | relaxed_order | strict_order
   max_scan_tuples: 20000
+router:                           # used when a request sets route_by_query_type (Phase 2 experiment)
+  literal:                        # the query has an error name, multi-word flag or field path
+    use_dense: true
+    use_keyword: true
+    w_dense: 1.0
+    w_keyword: 0.5                # best exact-string recall@5 in the Phase 1 fusion sweep
+    rrf_k: 10
+  default:                        # everything else: dense only (decision 29)
+    use_dense: true
+    use_keyword: false

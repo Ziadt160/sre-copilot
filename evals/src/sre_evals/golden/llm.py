@@ -1,4 +1,7 @@
-"""A DeepEval custom LLM over any OpenAI-compatible chat endpoint (Ollama, Groq, ...)."""
+"""A DeepEval custom LLM over any OpenAI-compatible chat endpoint (Ollama, Groq, ...).
+
+`ModelSpec` and `parse_model_spec` live in `sre_shared.llm`; they are re-exported here.
+"""
 
 from __future__ import annotations
 
@@ -11,49 +14,10 @@ from deepeval.models import DeepEvalBaseLLM
 from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel, ValidationError
 
-from sre_shared.config import Limits, load_limits
-from sre_shared.settings import Settings, get_settings
+from sre_shared.llm import ModelSpec as ModelSpec
+from sre_shared.llm import parse_model_spec as parse_model_spec
 
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class ModelSpec:
-    provider: str
-    model: str
-    base_url: str
-    api_key: str | None
-
-    @property
-    def label(self) -> str:
-        return f"{self.provider}:{self.model}"
-
-    @property
-    def hosted(self) -> bool:
-        return self.provider != "ollama"
-
-
-def parse_model_spec(
-    spec: str, settings: Settings | None = None, limits: Limits | None = None
-) -> ModelSpec:
-    """`ollama:qwen2.5:7b` or `groq:openai/gpt-oss-20b` -> endpoint and key (key by name only)."""
-    provider, sep, model = spec.partition(":")
-    if not sep or not model:
-        raise ValueError(f"model must look like provider:name, got {spec!r}")
-    settings = settings or get_settings()
-    limits = limits or load_limits()
-    if provider == "ollama":
-        return ModelSpec(provider, model, settings.ollama_base_url.rstrip("/") + "/v1", "ollama")
-    if provider not in limits.providers or not limits.providers[provider].base_url:
-        raise ValueError(
-            f"unknown provider {provider!r}; known: ollama, {sorted(limits.providers)}"
-        )
-    prov = limits.providers[provider]
-    key_attr = (prov.key_env or "").lower()
-    secret = getattr(settings, key_attr, None)
-    key = secret.get_secret_value() if secret is not None else None
-    assert prov.base_url is not None
-    return ModelSpec(provider, model, prov.base_url, key)
 
 
 class JsonReplyError(ValueError):

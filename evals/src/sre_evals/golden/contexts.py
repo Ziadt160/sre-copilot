@@ -11,7 +11,6 @@ Pages about writing the docs are skipped. Selection is deterministic for a seed.
 from __future__ import annotations
 
 import random
-import re
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from pathlib import Path
@@ -20,43 +19,13 @@ from typing import Any, Literal
 from psycopg import AsyncConnection
 from pydantic import BaseModel
 
+from sre_shared.literals import find_exact_strings as find_exact_strings
+
 PickStratum = Literal["factual", "exact_string"]
 
 MIN_BODY_CHARS = 200
 MAX_BODY_CHARS = 2500
 
-# Well-known pod/container status and event reasons; extended by the generic Err* pattern.
-_ERROR_NAMES = (
-    "CrashLoopBackOff",
-    "ImagePullBackOff",
-    "ErrImagePull",
-    "ErrImageNeverPull",
-    "OOMKilled",
-    "CreateContainerConfigError",
-    "CreateContainerError",
-    "RunContainerError",
-    "ContainerCannotRun",
-    "FailedScheduling",
-    "FailedMount",
-    "NodeNotReady",
-    "DeadlineExceeded",
-    "Unschedulable",
-    "InvalidImageName",
-    "ContainerStatusUnknown",
-)
-ERROR_RE = re.compile(
-    r"(?<![\w.-])(?:" + "|".join(_ERROR_NAMES) + r"|Err[A-Z][A-Za-z]{3,})(?![\w-])"
-)
-# Multi-word long flags such as --max-surge (single-word flags are too generic to be a test).
-FLAG_RE = re.compile(r"(?<![\w-])--[a-z][a-z0-9]*(?:-[a-z0-9]+)+(?![\w-])")
-FIELD_RE = re.compile(
-    r"(?<![\w.])(?:spec|status|metadata)(?:\.[a-z][A-Za-z0-9]*(?:\[\])?){2,}(?![\w.])"
-)
-_KINDS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("error", ERROR_RE),
-    ("flag", FLAG_RE),
-    ("field", FIELD_RE),
-)
 KIND_ORDER = ("error", "field", "flag")
 # Most distinct pages (in one version) a literal may appear on; with more, a single gold passage
 # is arbitrary. Error names are few in the docs and central to SRE questions, so they get room.
@@ -76,17 +45,6 @@ class ContextRow(BaseModel):
     stratum: PickStratum
     matched: str | None = None
     match_kind: str | None = None
-
-
-def find_exact_strings(text: str) -> list[tuple[str, str]]:
-    """All (kind, string) candidates in text, in order of first appearance, deduplicated."""
-    found: dict[str, tuple[int, str]] = {}
-    for kind, pattern in _KINDS:
-        for m in pattern.finditer(text):
-            s = m.group(0)
-            if s not in found or m.start() < found[s][0]:
-                found[s] = (m.start(), kind)
-    return [(kind, s) for s, (_, kind) in sorted(found.items(), key=lambda kv: kv[1][0])]
 
 
 def read_contexts(path: Path) -> list[ContextRow]:

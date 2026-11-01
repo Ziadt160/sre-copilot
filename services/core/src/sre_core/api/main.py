@@ -23,6 +23,7 @@ from sre_shared.models import (
     RetrievalResult,
     TsConfig,
 )
+from sre_shared.settings import get_settings
 
 
 def get_claims(authorization: Annotated[str | None, Header()] = None) -> Claims:
@@ -45,10 +46,16 @@ def create_app(retriever: Retriever | None = None) -> FastAPI:
             return
         pool = create_pool()
         await pool.open()
-        app.state.retriever = Retriever(pool)
+        replica_url = get_settings().database_replica_url
+        read_pool = create_pool(replica_url) if replica_url else None
+        if read_pool is not None:
+            await read_pool.open()  # failures fall back to the primary per request
+        app.state.retriever = Retriever(pool, read_pool=read_pool)
         try:
             yield
         finally:
+            if read_pool is not None:
+                await read_pool.close()
             await pool.close()
 
     app = FastAPI(title="SRE Copilot core", version="0.1.0", lifespan=lifespan)
