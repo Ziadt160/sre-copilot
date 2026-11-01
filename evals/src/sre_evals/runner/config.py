@@ -7,6 +7,7 @@ Schema (all keys optional except `name`):
     embedding_model: gte-small      # gte-small | bge-large | bge-m3
     legs: [dense, keyword]          # any non-empty subset
     ts_config: english              # english | simple
+    keyword_match: any              # any | all query terms
     weights: {dense: 1.0, keyword: 1.0}
     k: [3, 5, 8, 10]                # reporting cutoffs; retrieval runs once at max(k)
     candidates_per_leg: 50
@@ -28,6 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from sre_shared.models import (
     EmbeddingModelName,
     IterativeScan,
+    KeywordMatch,
     RetrievalFilters,
     RetrievalRequest,
     TsConfig,
@@ -57,6 +59,7 @@ class ExperimentConfig(BaseModel):
     embedding_model: EmbeddingModelName = "gte-small"
     legs: list[Leg] = Field(default_factory=_both_legs)
     ts_config: TsConfig = "english"
+    keyword_match: KeywordMatch = "any"
     weights: Weights = Field(default_factory=Weights)
     k: list[int] = Field(default_factory=lambda: list(DEFAULT_KS))
     candidates_per_leg: int = Field(default=50, ge=1, le=500)
@@ -100,6 +103,7 @@ class ExperimentConfig(BaseModel):
             "use_dense": self.uses_dense,
             "use_keyword": self.uses_keyword,
             "ts_config": self.ts_config,
+            "keyword_match": self.keyword_match,
             "candidates_per_leg": self.candidates_per_leg,
             "k": self.max_k,
             "w_dense": self.weights.dense,

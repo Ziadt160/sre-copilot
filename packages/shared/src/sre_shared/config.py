@@ -69,6 +69,7 @@ class HnswConfig(BaseModel):
 class RetrievalDefaults(BaseModel):
     embedding_model: str = "gte-small"
     ts_config: Literal["english", "simple"] = "english"
+    keyword_match: Literal["any", "all"] = "any"
     candidates_per_leg: int = 50
     k: int = 5
     rrf_k: int = 60

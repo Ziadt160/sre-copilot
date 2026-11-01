@@ -33,7 +33,7 @@ _CANDIDATES_SQL = (
     "select chunk_id, dense_rank, keyword_rank, dense_similarity, keyword_score"
     " from public.search_candidates("
     "%(column)s, %(qvec)s::halfvec, %(query)s, %(ts)s, %(n)s, %(version)s,"
-    " %(k8s)s::text[], %(doc)s::text[], %(dense)s, %(keyword)s, %(exact)s)"
+    " %(k8s)s::text[], %(doc)s::text[], %(dense)s, %(keyword)s, %(exact)s, %(kw_match)s)"
 )
 
 _HYDRATE_SQL = (
@@ -104,6 +104,7 @@ class Retriever:
             "dense": req.use_dense,
             "keyword": req.use_keyword,
             "exact": exact,
+            "kw_match": req.keyword_match,
         }
 
         async with self._pool.connection() as pooled, as_user(pooled, claims) as conn:

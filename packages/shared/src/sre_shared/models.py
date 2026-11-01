@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 EmbeddingModelName = Literal["gte-small", "bge-large", "bge-m3"]
 TsConfig = Literal["english", "simple"]
+KeywordMatch = Literal["any", "all"]
 IterativeScan = Literal["off", "relaxed_order", "strict_order"]
 
 
@@ -123,6 +124,9 @@ class RetrievalRequest(BaseModel):
     use_dense: bool = True
     use_keyword: bool = True
     ts_config: TsConfig = "english"
+    keyword_match: KeywordMatch = Field(
+        default="any", description="any (OR of query terms, ranked) | all (every term must match)"
+    )
     candidates_per_leg: int = Field(default=50, ge=1, le=500)
     k: int = Field(default=5, ge=1, le=100)
     w_dense: float = Field(default=1.0, ge=0)

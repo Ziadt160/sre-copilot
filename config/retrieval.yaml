@@ -2,6 +2,7 @@
 # (config/experiments/), not left at its default; the eval run stamps record which config ran.
 embedding_model: gte-small        # gte-small | bge-large | bge-m3 (lab only for the BGE models)
 ts_config: english                # english | simple
+keyword_match: any                # any | all query terms (all: websearch_to_tsquery)
 candidates_per_leg: 50
 k: 5
 rrf_k: 60
