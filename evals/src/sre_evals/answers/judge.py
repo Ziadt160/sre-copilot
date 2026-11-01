@@ -137,6 +137,9 @@ class DeepEvalJudge:
 
     llm: DeepEvalBaseLLM
     label: str
+    prompt_version: str = JUDGE_PROMPT_VERSION
+    faithfulness_calls: int = FAITHFULNESS_CALLS  # for the quota plan
+    reply_tokens: int = JUDGE_MAX_TOKENS // 2  # likely reply size per call, for the plan
     faithfulness_failures: int = 0  # reply not parseable against the schema
     relevancy_failures: int = 0
     no_claims: int = 0  # the judge extracted no claim from a non-empty answer
@@ -195,12 +198,22 @@ def build_judge(client: ChatClient) -> DeepEvalJudge:
     return DeepEvalJudge(ChatClientLLM(client), client.spec.label)
 
 
-def estimate_judge_tokens(answer: str, contexts: Sequence[str], *, relevancy: bool = True) -> int:
+def estimate_judge_tokens(
+    answer: str,
+    contexts: Sequence[str],
+    *,
+    relevancy: bool = True,
+    faithfulness_calls: int = FAITHFULNESS_CALLS,
+    reply_tokens: int = JUDGE_MAX_TOKENS // 2,
+) -> int:
     """Rough tokens one judged answer will cost (4 chars per token, every call carries the
-    answer and the passages, plus the reply budget). Used for the quota guard, so it errs high."""
+    answer and the passages, plus the reply budget). Used for the quota guard, so it errs high.
+    `faithfulness_calls` / `reply_tokens` describe the faithfulness judge (the rubric judge
+    makes one call with a longer reply)."""
     chars = len(answer) + sum(len(c) for c in contexts)
-    calls = FAITHFULNESS_CALLS + (RELEVANCY_CALLS if relevancy else 0)
-    return calls * (chars // 4 + 400 + JUDGE_MAX_TOKENS // 2)
+    faith = faithfulness_calls * (chars // 4 + 400 + reply_tokens)
+    rel = (RELEVANCY_CALLS if relevancy else 0) * (chars // 4 + 400 + JUDGE_MAX_TOKENS // 2)
+    return faith + rel
 
 
 def check_judge_budget(client: ChatClient, planned_tokens: int) -> None:

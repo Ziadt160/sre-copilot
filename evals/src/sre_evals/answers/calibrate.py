@@ -66,6 +66,7 @@ class JudgeAgreement:
     accuracy_binary: float | None = None
     kappa_binary: float | None = None
     vs_reference: dict[str, float | None] = field(default_factory=dict)
+    prompt_version: str = JUDGE_PROMPT_VERSION
     labels: dict[tuple[int, str], str] = field(default_factory=dict, repr=False)
     human: dict[tuple[int, str], str] = field(default_factory=dict, repr=False)  # joined labels
 
@@ -78,22 +79,28 @@ class JudgeAgreement:
             "accuracy_binary": self.accuracy_binary,
             "kappa_binary": self.kappa_binary,
             "vs_reference": self.vs_reference,
+            "prompt_version": self.prompt_version,
         }
 
 
-def plan_tokens(items: Sequence[LabelItem]) -> int:
+def plan_tokens(items: Sequence[LabelItem], judge: Judge | None = None) -> int:
+    """Faithfulness-only tokens for `items`, sized for `judge` (DeepEval's when None)."""
+    kw = {
+        k: getattr(judge, k)
+        for k in ("faithfulness_calls", "reply_tokens")
+        if judge is not None and hasattr(judge, k)
+    }
     return sum(
-        estimate_judge_tokens(i.answer, [p.text for p in i.passages], relevancy=False)
+        estimate_judge_tokens(i.answer, [p.text for p in i.passages], relevancy=False, **kw)
         for i in items
     )
 
 
 def check_budgets(handles: Sequence[JudgeHandle], items: Sequence[LabelItem]) -> None:
     """Raise `QuotaExceeded` before any call if a hosted judge cannot cover the whole set."""
-    planned = plan_tokens(items)
     for h in handles:
         if h.client is not None:
-            check_judge_budget(h.client, planned)
+            check_judge_budget(h.client, plan_tokens(items, h.judge))
 
 
 def agreement(
@@ -143,6 +150,7 @@ async def calibrate(
 
         judged = dict(await asyncio.gather(*(one(i) for i in chosen)))
         results.append(agreement(h.name, human, judged))
+        results[-1].prompt_version = getattr(h.judge, "prompt_version", JUDGE_PROMPT_VERSION)
 
     if reference is not None:
         ref = next(r for r in results if r.name == reference)

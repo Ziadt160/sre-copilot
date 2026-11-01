@@ -52,6 +52,18 @@ def _client(spec: str) -> ChatClient:
         raise typer.BadParameter(str(e)) from e
 
 
+def _judge(spec: str) -> tuple[Judge, ChatClient]:
+    """`provider:name` is DeepEval's faithfulness (three calls); `rubric:provider:name` is
+    the one-call rubric judge on that model (relevancy still DeepEval's)."""
+    from sre_evals.answers.rubric_judge import PREFIX, RubricJudge
+
+    client = _client(spec.removeprefix(PREFIX))
+    deepeval = build_judge(client)
+    if spec.startswith(PREFIX):
+        return RubricJudge(client, deepeval), client
+    return deepeval, client
+
+
 def load_answer_experiments() -> dict[str, ExperimentConfig]:
     """Answer experiments live in `config/experiments/answers/`, apart from the retrieval ones
     (the retrieval loader reads only the top-level directory, so `retrieval --all` skips them)."""
@@ -129,13 +141,13 @@ def run_cmd(
 
     judge_obj: Judge | None = None
     if judge:
-        client = _client(judge)
+        judge_obj, client = _judge(judge)
+        planned = plan_judge_tokens(answer_cfg, len(chosen) * repeat, judge_obj)
         try:  # refuse up front: no answer is generated if the judge cannot finish the run
-            check_judge_budget(client, plan_judge_tokens(answer_cfg, len(chosen) * repeat))
+            check_judge_budget(client, planned)
         except QuotaExceeded as e:
             console.print(f"refused: {e}")
             raise typer.Exit(2) from e
-        judge_obj = build_judge(client)
     gversion = golden_version(path)
     dsn = database_url or get_settings().database_url
     run(_run(dsn, cfg, chosen, judge_obj, loop, gversion, answer_cfg, repeat, concurrency))
@@ -202,7 +214,7 @@ def judge_cmd(
 
     if repeat < 1:
         raise typer.BadParameter("--repeat must be at least 1")
-    judge_obj = build_judge(_client(judge))
+    judge_obj, _ = _judge(judge)
     dsn = database_url or get_settings().database_url
 
     async def go() -> None:
@@ -272,8 +284,8 @@ def calibrate_cmd(
         raise typer.BadParameter(f"{labels}: no labels")
     handles = []
     for spec in specs:
-        client = _client(spec)
-        handles.append(JudgeHandle(spec, build_judge(client), client))
+        judge_obj, client = _judge(spec)
+        handles.append(JudgeHandle(spec, judge_obj, client))
 
     async def go() -> None:
         conn = await connect(database_url or get_settings().database_url, autocommit=True)

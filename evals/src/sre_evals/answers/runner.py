@@ -93,11 +93,17 @@ def _mean(values: Sequence[float]) -> float | None:
     return float(np.mean(values)) if values else None
 
 
-def plan_judge_tokens(answer_cfg: AnswerConfig, n_answers: int) -> int:
+def plan_judge_tokens(answer_cfg: AnswerConfig, n_answers: int, judge: Judge | None = None) -> int:
     """Upper-ish estimate of the judge tokens for `n_answers` answers under `answer_cfg`,
-    before any answer exists: answer at max_tokens, passages at the context budget."""
+    before any answer exists: answer at max_tokens, passages at the context budget. Sized for
+    `judge` (its `faithfulness_calls` / `reply_tokens`), DeepEval's when None."""
+    kw = {
+        k: getattr(judge, k)
+        for k in ("faithfulness_calls", "reply_tokens")
+        if judge is not None and hasattr(judge, k)
+    }
     per = estimate_judge_tokens(
-        "x" * (answer_cfg.max_tokens * 4), ["x" * (answer_cfg.context_token_budget * 4)]
+        "x" * (answer_cfg.max_tokens * 4), ["x" * (answer_cfg.context_token_budget * 4)], **kw
     )
     return per * n_answers
 
@@ -313,13 +319,14 @@ async def run_answers(
     batch = uuid.uuid4().hex[:12]
     outcomes: list[AnswerRunOutcome] = []
     sem = asyncio.Semaphore(max(1, concurrency))
+    judge_version = getattr(judge, "prompt_version", JUDGE_PROMPT_VERSION)
     for rep in range(1, repeat + 1):
         stamps = VersionStamps(
             config_hash=config_hash({"experiment": cfg, "answer": acfg}),
             embedding_model=cfg.embedding_model,
             embedding_revision=SPECS[cfg.embedding_model].revision,
             golden_version=golden_version,
-            prompt_versions={"answer": acfg.prompt_version, "judge": JUDGE_PROMPT_VERSION},
+            prompt_versions={"answer": acfg.prompt_version, "judge": judge_version},
             models_per_node={"answer": acfg.model, "judge": judge.label if judge else "none"},
         )
         meta: dict[str, Any] = {
@@ -329,7 +336,7 @@ async def run_answers(
             "batch": batch,
             "model": acfg.model,
             "judge": judge.label if judge else "none",
-            "judge_prompt_version": JUDGE_PROMPT_VERSION,
+            "judge_prompt_version": judge_version,
             "metric_version": metric_version(),
             "answer_prompt_version": acfg.prompt_version,
             "golden_version": golden_version,
