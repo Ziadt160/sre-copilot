@@ -83,7 +83,8 @@ jobs:
           path: ${{ env.HF_HOME }}
           key: hf-models-${{ hashFiles('packages/shared/src/sre_shared/embed/base.py') }}
       - name: Model tests
-        run: uv run pytest -m models
+        # gte-small on ONNX only: the BGE tests need the lab GPU server, parity the Edge Runtime.
+        run: uv run pytest -m "models and not lab and not gpu"
 
   retrieval-gate:
     runs-on: ubuntu-24.04
