@@ -69,9 +69,13 @@ class OnnxGteSmall:
     def _embed(self, texts: list[str], batch_size: int) -> Vectors:
         if not texts:
             return np.zeros((0, self.spec.dims), dtype=np.float32)
+        # Batches pad to their longest text, so embed in length order and restore the input
+        # order at the end; mixed lengths otherwise pay for padding.
+        order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
+        ordered = [texts[i] for i in order]
         out: list[Vectors] = []
-        for start in range(0, len(texts), batch_size):
-            batch = self._tok.encode_batch(texts[start : start + batch_size])
+        for start in range(0, len(ordered), batch_size):
+            batch = self._tok.encode_batch(ordered[start : start + batch_size])
             ids = np.array([e.ids for e in batch], dtype=np.int64)
             mask = np.array([e.attention_mask for e in batch], dtype=np.int64)
             feeds = {"input_ids": ids, "attention_mask": mask}
@@ -81,7 +85,9 @@ class OnnxGteSmall:
             m = mask[..., None].astype(np.float32)
             pooled = (hidden * m).sum(axis=1) / np.clip(m.sum(axis=1), 1e-9, None)
             out.append(l2_normalize(pooled))
-        return np.concatenate(out, axis=0)
+        result = np.empty((len(texts), self.spec.dims), dtype=np.float32)
+        result[order] = np.concatenate(out, axis=0)
+        return result
 
 
 def _resolve_revision(repo_id: str, offline: bool) -> str:

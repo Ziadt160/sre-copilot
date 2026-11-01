@@ -26,6 +26,14 @@ def test_batch_equals_single(gte: Embedder) -> None:
     np.testing.assert_allclose(batch, single, atol=1e-5)
 
 
+def test_output_order_follows_input_with_mixed_lengths(gte: Embedder) -> None:
+    """Texts are embedded in length order internally; rows must come back in input order."""
+    texts = ["x " * 300, "pod", "a medium sentence about Services " * 4, "node", "y " * 120]
+    batch = gte.embed_documents(texts, batch_size=2)
+    single = np.vstack([gte.embed_documents([t]) for t in texts])
+    np.testing.assert_allclose(batch, single, atol=1e-5)
+
+
 def test_semantics_are_sane(gte: Embedder) -> None:
     q, near, far = gte.embed_documents(
         [
