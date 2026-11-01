@@ -8,6 +8,8 @@ One `eval_runs` row per repeat (`--repeat N` stores N). `eval_runs.summary` keys
                                           "none" when judging was skipped)
     judge_prompt_version, metric_version, answer_prompt_version
     n_items, n_answered, n_abstained, judge_failures
+    n_reranked                            answers whose retrieval reranked (lab: all of them;
+                                          `require_rerank` stops a run that falls back)
     n_empty_answers, n_hit_max_tokens     answered with no text; answers whose completion
                                           reached max_tokens (cut off, or reasoning ate it)
     faithfulness, answer_relevancy        mean over answered items the judge scored
@@ -51,7 +53,13 @@ from sre_evals.answers.judge import (
 )
 from sre_evals.answers.scoring import AnswerScores, score_answer
 from sre_evals.runner.config import ExperimentConfig
-from sre_evals.runner.engine import RunOutcome, _chunker_version, _insert_run, latency_stats
+from sre_evals.runner.engine import (
+    RerankFallback,
+    RunOutcome,
+    _chunker_version,
+    _insert_run,
+    latency_stats,
+)
 from sre_shared.embed.base import SPECS
 from sre_shared.models import (
     ANONYMOUS,
@@ -122,6 +130,7 @@ def summarize(
         "n_answered": len(answered),
         "n_abstained": len(runs) - len(answered),
         "n_empty_answers": sum(1 for r in answered if not r.result.answer.strip()),
+        "n_reranked": sum(1 for r in runs if r.result.reranked),
         "n_hit_max_tokens": sum(
             1 for r in runs if r.result.completion_tokens >= r.result.config.max_tokens
         ),
@@ -252,6 +261,7 @@ async def _one(
     corpus_version_id: int | None,
     cache: AnswerCache | None = None,
     retry_delays: Sequence[float] = RETRY_DELAYS_S,
+    require_rerank: bool = False,
 ) -> ItemRun:
     req = AnswerRequest(
         question=item.question,
@@ -262,6 +272,9 @@ async def _one(
     result = cache.get(item.id, item.question) if cache is not None else None
     if result is None:
         result = await _answer_with_retries(answerer, req, claims, retry_delays)
+        if require_rerank and result.context and not result.reranked:
+            # Checked before caching, so a rerun generates this answer again.
+            raise RerankFallback(f"{item.id}: reranker unavailable, fused order kept")
         if cache is not None:
             cache.put(item.id, result)
     run = ItemRun(item, result, score_answer(result, item))
@@ -290,6 +303,7 @@ async def run_answers(
     use_cache: bool = False,
     cache_directory: Path | None = None,
     retry_delays: Sequence[float] = RETRY_DELAYS_S,
+    require_rerank: bool = False,
 ) -> list[AnswerRunOutcome]:
     """Answer and score every item `repeat` times; one stored `kind='answer'` run per repeat.
     An answerer, judge-transport or quota error stores a `failed` run (no scores) and re-raises;
@@ -336,7 +350,7 @@ async def run_answers(
             async with sem:
                 return await _one(
                     item, cfg, acfg, answerer, judge, claims, cfg.resolved_corpus_version_id,
-                    cache, retry_delays,
+                    cache, retry_delays, require_rerank,
                 )  # fmt: skip
 
         try:

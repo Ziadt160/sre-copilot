@@ -135,6 +135,7 @@ async def collect(dsn: str, golden: str, ks: Sequence[int], budget: int | None) 
     reranker = default_reranker()
     if reranker is None:
         raise SystemExit("no reranker configured for this environment")
+    await reranker.warm()
     compressors: dict[str, Compressor] = {
         "none": NoCompressor(),
         "sentence": SentenceCompressor(get_embedder("gte-small")),

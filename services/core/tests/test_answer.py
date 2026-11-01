@@ -231,3 +231,16 @@ async def test_quota_exceeded_raises_before_any_event() -> None:
     with pytest.raises(QuotaExceeded):
         await anext(gen)
     assert comps.calls == []
+
+
+async def test_answers_record_whether_retrieval_reranked() -> None:
+    # Eval runs refuse answers whose retrieval fell back to the fused order (decision 33).
+    for reranked in (True, False):
+        chat, _ = fake_chat("Pods [1].")
+        retr = StubRetriever([chunk(1)], reranked=reranked)
+        ans = build_answerer(cast(Retriever, retr), config=CFG, chat=chat, embedder=FakeEmbedder())
+        assert (await ans.answer(AnswerRequest(question="q"))).reranked is reranked
+        low = StubRetriever([chunk(1, sim=0.1)], reranked=reranked)
+        ans = build_answerer(cast(Retriever, low), config=CFG, chat=chat, embedder=FakeEmbedder())
+        res = await ans.answer(AnswerRequest(question="q"))
+        assert res.abstained and res.reranked is reranked

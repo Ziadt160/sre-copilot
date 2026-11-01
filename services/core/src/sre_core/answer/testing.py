@@ -93,9 +93,12 @@ def chunk(
 class StubRetriever:
     """Returns fixed chunks and records the request and claims it was called with."""
 
-    def __init__(self, chunks: list[RetrievedChunk], version: int = 7) -> None:
+    def __init__(
+        self, chunks: list[RetrievedChunk], version: int = 7, reranked: bool = False
+    ) -> None:
         self.chunks = chunks
         self.version = version
+        self.reranked = reranked
         self.calls: list[tuple[RetrievalRequest, Claims]] = []
 
     async def retrieve(self, req: RetrievalRequest, claims: Claims = ANONYMOUS) -> RetrievalResult:
@@ -105,4 +108,5 @@ class StubRetriever:
             corpus_version_id=self.version,
             chunks=self.chunks[: req.k],
             timings_ms={"embed": 0.0, "sql": 0.0, "fuse": 0.0, "total": 0.0},
+            reranked=self.reranked,
         )

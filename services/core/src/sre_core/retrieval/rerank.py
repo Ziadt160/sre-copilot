@@ -27,6 +27,7 @@ def default_reranker() -> RemoteReranker | None:
 
 DEFAULT_MODEL = "BAAI/bge-reranker-base"
 MAX_LENGTH = 512
+WARM_TIMEOUT_S = 180.0  # loading from disk onto the GPU, measured at well over 10 s
 
 
 class RemoteReranker:
@@ -55,17 +56,26 @@ class RemoteReranker:
     async def rerank(self, query: str, chunks: Sequence[RetrievedChunk]) -> list[float]:
         if not chunks:
             return []
+        return await self._score(query, [f"{c.header}\n\n{c.body}" for c in chunks], self.timeout)
+
+    async def warm(self, load_timeout_s: float = WARM_TIMEOUT_S) -> None:
+        """Have the server load the model now. The first request after an unload loads it
+        from disk, which takes longer than a query's timeout allows, so that query would fall
+        back to the fused order. Eval runs call this first. Raises RerankerUnavailable."""
+        await self._score("warm-up", ["warm-up"], load_timeout_s)
+
+    async def _score(self, query: str, texts: list[str], timeout_s: float) -> list[float]:
         payload = {
             "hf_id": self.model,
             "revision": self.revision,
             "query": query,
-            "texts": [f"{c.header}\n\n{c.body}" for c in chunks],
+            "texts": texts,
             "max_length": MAX_LENGTH,
             "batch_size": self.batch_size,
         }
         try:
             resp = await self._client.post(
-                f"{self.base_url}/rerank", json=payload, timeout=self.timeout
+                f"{self.base_url}/rerank", json=payload, timeout=timeout_s
             )
         except httpx.HTTPError as exc:
             raise RerankerUnavailable(f"rerank request failed: {exc!r}") from exc
@@ -75,6 +85,6 @@ class RemoteReranker:
             out = [float(s) for s in resp.json()["scores"]]
         except (ValueError, KeyError, TypeError) as exc:
             raise RerankerUnavailable(f"rerank returned a malformed body: {exc!r}") from exc
-        if len(out) != len(chunks):
-            raise RerankerUnavailable(f"rerank returned {len(out)} scores for {len(chunks)} texts")
+        if len(out) != len(texts):
+            raise RerankerUnavailable(f"rerank returned {len(out)} scores for {len(texts)} texts")
         return out

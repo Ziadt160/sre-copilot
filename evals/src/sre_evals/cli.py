@@ -139,7 +139,7 @@ async def _run_all(
     try:
         retrievers: dict[str | None, Any] = {}
         for cfg in selected:
-            retriever = retriever_for(pool, cfg, retrievers)
+            retriever = await retriever_for(pool, cfg, retrievers)
             outcome = await run_experiment(
                 cfg, all_items, retriever, conn, loop=loop, golden_version=gversion,
                 concurrency=concurrency, ann=ann, ann_sample=ann_sample,
@@ -169,8 +169,9 @@ async def _run_all(
     return failed
 
 
-def retriever_for(pool: Any, cfg: Any, cache: dict[str | None, Any]) -> Any:
-    """One Retriever per reranker model, so experiments without a reranker never load one."""
+async def retriever_for(pool: Any, cfg: Any, cache: dict[str | None, Any]) -> Any:
+    """One Retriever per reranker model, so experiments without a reranker never load one.
+    A reranker is warmed first: a cold one makes the first query fall back (RerankFallback)."""
     from sre_core.retrieval.rerank import RemoteReranker
     from sre_core.retrieval.service import Retriever
 
@@ -179,6 +180,8 @@ def retriever_for(pool: Any, cfg: Any, cache: dict[str | None, Any]) -> Any:
         reranker = (
             RemoteReranker(cfg.rerank.model, revision=cfg.rerank.revision) if cfg.rerank else None
         )
+        if reranker is not None:
+            await reranker.warm()
         cache[key] = Retriever(pool, reranker=reranker)
     return cache[key]
 
@@ -237,7 +240,7 @@ def sweep(
             retrievers: dict[str | None, Any] = {}
             for params in points:
                 cfg = derive(configs[base], params)
-                retriever = retriever_for(pool, cfg, retrievers)
+                retriever = await retriever_for(pool, cfg, retrievers)
                 outcome = await run_experiment(
                     cfg, items, retriever, conn, loop="local", golden_version=gversion,
                     ann=ann_recall, ann_sample=len(scorable), ann_ef_values=[cfg.ef_search],

@@ -147,3 +147,28 @@ def test_default_reranker_follows_the_environment(monkeypatch: pytest.MonkeyPatc
         if got is not None:
             assert got.revision == "2cfc18c9415c912f9d8155881c133215df768a70"
     get_settings.cache_clear()
+
+
+async def test_warm_loads_the_model_with_a_long_timeout() -> None:
+    # The first request after an unload loads the model from disk; with the query timeout
+    # (10 s) it timed out and that query fell back to the fused order.
+    from sre_core.retrieval.rerank import WARM_TIMEOUT_S
+
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(200, json={"scores": [0.5]})
+
+    rr = make(handler, timeout=10.0)
+    await rr.warm()
+    assert json.loads(seen[0].content)["texts"] == ["warm-up"]
+    assert seen[0].extensions["timeout"]["read"] == WARM_TIMEOUT_S
+    await rr.rerank("q", [chunk(1)])
+    assert seen[1].extensions["timeout"]["read"] == 10.0
+
+
+async def test_warm_failure_raises() -> None:
+    rr = make(lambda req: httpx.Response(500, json={"error": "boom"}))
+    with pytest.raises(RerankerUnavailable):
+        await rr.warm()

@@ -254,6 +254,11 @@ class AnswerResult(BaseModel):
     prompt_tokens: int = 0
     completion_tokens: int = 0
     context_tokens: int = 0
+    reranked: bool = Field(
+        default=False,
+        description="retrieval reranked its candidates (False: no reranker, or it failed and"
+        " the fused order was kept)",
+    )
     timings_ms: dict[str, float] = Field(description="retrieve, compress, generate, total")
 
 

@@ -80,8 +80,10 @@ class _Prepared:
         abstain: bool,
         timings: dict[str, float],
         t0: float,
+        reranked: bool = False,
     ) -> None:
         self.cfg = cfg
+        self.reranked = reranked
         self.version = version
         self.retrieved = retrieved
         self.context = context
@@ -179,7 +181,10 @@ class Answerer:
             )
         t2 = time.perf_counter()
         timings = {"retrieve": (t1 - t0) * 1000, "compress": (t2 - t1) * 1000}
-        return _Prepared(cfg, result.corpus_version_id, retrieved, context, abstain, timings, t0)
+        return _Prepared(
+            cfg, result.corpus_version_id, retrieved, context, abstain, timings, t0,
+            reranked=result.reranked,
+        )  # fmt: skip
 
     def _finish(
         self,
@@ -209,6 +214,7 @@ class Answerer:
             config=p.cfg,
             model=model,
             corpus_version_id=p.version,
+            reranked=p.reranked,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             context_tokens=sum(count_tokens(c.header) + count_tokens(c.body) for c in p.context),
@@ -226,6 +232,7 @@ class Answerer:
             config=p.cfg,
             model=p.cfg.model,
             corpus_version_id=p.version,
+            reranked=p.reranked,
             timings_ms={**p.timings, "generate": 0.0, "total": (t_end - p.t0) * 1000},
         )
 

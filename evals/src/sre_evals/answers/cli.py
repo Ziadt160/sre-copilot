@@ -164,11 +164,15 @@ async def _run(
     try:
         from sre_core.retrieval.rerank import default_reranker
 
-        retriever = Retriever(pool, reranker=default_reranker())
+        reranker = default_reranker()
+        if reranker is not None:
+            await reranker.warm()
+        retriever = Retriever(pool, reranker=reranker)
         answerer = build_answerer(retriever, config=answer_cfg)
         outcomes = await run_answers(
             cfg, chosen, answerer, conn, judge=judge, loop=loop, golden_version=gversion,
             answer_cfg=answer_cfg, repeat=repeat, concurrency=concurrency, use_cache=True,
+            require_rerank=reranker is not None,
         )  # fmt: skip
         for o in outcomes:
             s = o.summary

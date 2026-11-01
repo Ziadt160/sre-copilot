@@ -114,6 +114,11 @@ def summarize(runs: Sequence[_ItemRun], cfg: ExperimentConfig, n_items: int) -> 
     return summary
 
 
+class RerankFallback(RuntimeError):
+    """A run that asks for reranking got the fused order for some query (the reranker failed
+    or timed out). Mixing the two would measure neither, so the run stops."""
+
+
 async def _retrieve_all(
     cfg: ExperimentConfig,
     items: Sequence[GoldenItem],
@@ -129,6 +134,8 @@ async def _retrieve_all(
             result = await retriever.retrieve(
                 cfg.request_for(item.question, item.filters), claims, exact=exact
             )
+        if cfg.rerank is not None and result.chunks and not result.reranked:
+            raise RerankFallback(f"{item.id}: reranker unavailable, fused order kept")
         scores = score_item(
             result.chunks,
             item.gold_passages,
