@@ -240,6 +240,7 @@ class ReviewDecision(BaseModel):
     expected_answer: str | None = None
     quote: str | None = None  # verbatim sub-span of the (single) gold quote to keep
     reason: str = ""
+    add_tags: list[str] = []  # provenance, e.g. a second reviewer's verdict
 
 
 @dataclass
@@ -275,6 +276,7 @@ def apply_decisions(session: ReviewSession, decisions: list[ReviewDecision]) -> 
             continue
         work = session._need()
         work.notes = d.reason or work.notes
+        work.tags = [*work.tags, *(t for t in d.add_tags if t not in work.tags)]
         if d.action == "accept":
             session.accept()
             report.accepted += 1

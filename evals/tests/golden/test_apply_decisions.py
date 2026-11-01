@@ -61,7 +61,7 @@ def test_accept_reject_rewrite_and_trim(tmp_path: Path) -> None:
                 quote="Use --max-surge to bound extra Pods during a rolling update.",
                 reason="rewritten in an operator's words",
             ),
-            ReviewDecision(id="exs-0001", action="accept"),
+            ReviewDecision(id="exs-0001", action="accept", add_tags=["check:accept"]),
         ],
     )
     assert (report.accepted, report.rejected, report.errors) == (2, 1, [])
@@ -75,6 +75,7 @@ def test_accept_reject_rewrite_and_trim(tmp_path: Path) -> None:
     )
     assert fac.reviewer == "claude-opus-5-5" and fac.reviewed_at == FIXED
     assert items["exs-0001"].origin == "synthetic"
+    assert items["exs-0001"].tags == ["exact:--max-surge", "check:accept"]
 
 
 def test_refused_edits_leave_the_item_pending(tmp_path: Path) -> None:
