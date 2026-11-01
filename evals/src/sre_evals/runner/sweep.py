@@ -126,6 +126,10 @@ async def build_hnsw(
     """Rebuild the model's HNSW index with these parameters (autocommit connection). Returns
     the build facts stored with each sweep point."""
     drop, create = hnsw_ddl(model, m, ef_construction)
+    # Single-threaded: a parallel build keeps the graph in dynamic shared memory, and the
+    # container's /dev/shm is too small for it ("could not resize shared memory segment",
+    # which also left the index dropped). One worker also makes build times comparable.
+    await conn.execute("set max_parallel_maintenance_workers = 0")
     await conn.execute("set maintenance_work_mem = '256MB'")
     await conn.execute(drop)
     t0 = time.perf_counter()

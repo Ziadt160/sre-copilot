@@ -270,7 +270,7 @@ def hnsw(
                 info = await build_hnsw(conn, name, mv, efc)
                 console.print(
                     f"built m={mv} ef_construction={efc}: {info['build_seconds']:.1f} s,"
-                    f" {info['index_mb']:.1f} MB"
+                    f" {info['index_mb']:.1f} MB (single-threaded)"
                 )
                 for ef in efs:
                     params = {"m": mv, "ef_construction": efc, "ef_search": ef}
@@ -284,13 +284,22 @@ def hnsw(
                     )  # fmt: skip
                     _print_point(cfg.name, outcome.run_id, outcome.summary)
         finally:
-            restored = await build_hnsw(conn, name, *HNSW_DEFAULT)
-            console.print(
-                f"restored the migration's index (m={HNSW_DEFAULT[0]},"
-                f" ef_construction={HNSW_DEFAULT[1]}) in {restored['build_seconds']:.1f} s"
-            )
-            await conn.close()
-            await pool.close()
+            try:
+                restored = await build_hnsw(conn, name, *HNSW_DEFAULT)
+                console.print(
+                    f"restored the migration's index (m={HNSW_DEFAULT[0]},"
+                    f" ef_construction={HNSW_DEFAULT[1]}) in {restored['build_seconds']:.1f} s"
+                )
+            except Exception:
+                console.print(
+                    f"[red]the {model} HNSW index may be missing: restore it with"
+                    f" `sre-eval hnsw --model {model} --m {HNSW_DEFAULT[0]}"
+                    f" --ef-construction {HNSW_DEFAULT[1]} --ef-search 100`[/]"
+                )
+                raise
+            finally:
+                await conn.close()
+                await pool.close()
 
     run(go())
 
@@ -298,9 +307,10 @@ def hnsw(
 def _print_point(label: str, run_id: int, s: dict[str, Any]) -> None:
     ann = s.get("ann_recall") or {}
     ann_txt = "  ann " + "/".join(f"{v:.3f}" for v in ann.values()) if ann else ""
-    console.print(
+    console.print(  # markup off: point names contain [brackets]
         f"{label}: run {run_id}  recall@5 {s['recall@5']:.3f}  MRR@10 {s['mrr@10']:.3f}  "
-        f"p50 {s['latency_ms']['p50']:.0f} ms  p95 {s['latency_ms']['p95']:.0f} ms{ann_txt}"
+        f"p50 {s['latency_ms']['p50']:.0f} ms  p95 {s['latency_ms']['p95']:.0f} ms{ann_txt}",
+        markup=False,
     )
 
 
