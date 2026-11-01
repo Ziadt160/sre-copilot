@@ -16,6 +16,7 @@ from sre_shared.llm import (
     MemoryLedger,
     ModelSpec,
     QuotaExceeded,
+    UnknownModelError,
     estimate_tokens,
     today,
 )
@@ -114,3 +115,12 @@ def test_file_ledger_keeps_only_today(tmp_path: Path) -> None:
     assert ledger.used("groq:m", today()) == 42
     assert list(json.loads(path.read_text(encoding="utf-8"))) == [today()]
     assert FileLedger(tmp_path / "missing.json").used("groq:m", today()) == 0
+
+
+def test_hosted_model_without_a_daily_limit_is_refused() -> None:
+    with pytest.raises(UnknownModelError, match="no tokens-per-day limit"):
+        client(ModelSpec("groq", "not-listed", "https://x/v1", "k"))
+
+
+def test_model_spec_repr_hides_the_key() -> None:
+    assert "secret-key" not in repr(ModelSpec("groq", "m", "https://x/v1", "secret-key"))

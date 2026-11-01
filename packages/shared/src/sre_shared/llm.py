@@ -15,7 +15,7 @@ import os
 import tempfile
 import time
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -37,7 +37,7 @@ class ModelSpec:
     provider: str
     model: str
     base_url: str
-    api_key: str | None
+    api_key: str | None = field(repr=False)  # never in logs or tracebacks
 
     @property
     def label(self) -> str:
@@ -69,6 +69,11 @@ def parse_model_spec(
     key = secret.get_secret_value() if secret is not None else None
     assert prov.base_url is not None
     return ModelSpec(provider, model, prov.base_url, key)
+
+
+class UnknownModelError(ValueError):
+    """A hosted model with no daily token limit configured: refused, because it would be
+    unguarded."""
 
 
 class QuotaExceeded(RuntimeError):
@@ -163,6 +168,12 @@ class ChatClient:
         self.spec = spec
         limits = limits or load_limits()
         self.tpd = limits.model_limits(spec.provider, spec.model).tpd if spec.hosted else None
+        if spec.hosted and self.tpd is None:
+            # Found by V04: an unlisted hosted model had no daily guard at all.
+            raise UnknownModelError(
+                f"{spec.label}: no tokens-per-day limit in config/limits.yaml; list the model "
+                "with its limits before using it"
+            )
         self.stop_share = (
             stop_share
             if stop_share is not None
