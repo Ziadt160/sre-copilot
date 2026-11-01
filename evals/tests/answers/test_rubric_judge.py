@@ -57,7 +57,10 @@ def judge(*texts: str) -> tuple[RubricJudge, FakeClient]:
     return RubricJudge(cast(ChatClient, fake), deepeval), fake
 
 
-GOOD = json.dumps({"claims": [{"claim": "a", "verdict": "supported", "answers_question": True}]})
+GOOD = json.dumps(
+    {"claims": [{"claim": "a", "verdict": "supported", "answers_question": True,
+                 "evidence": "source text"}]}
+)  # fmt: skip
 
 
 async def test_one_call_scores_and_a_bad_reply_gets_one_repair() -> None:
@@ -96,3 +99,38 @@ def test_the_cli_picks_the_judge_from_the_prefix(monkeypatch: pytest.MonkeyPatch
     rubric, _ = answers_cli._judge("rubric:groq:openai/gpt-oss-120b")
     plain, _ = answers_cli._judge("ollama:qwen2.5:7b")
     assert isinstance(rubric, RubricJudge) and getattr(plain, "kind", None) == "deepeval"
+
+
+async def test_supported_claims_need_evidence_that_is_in_the_sources() -> None:
+    src = "The container that is terminated does not clean up the packet filtering rules."
+    claims = [
+        {"claim": "rules stay", "verdict": "supported", "answers_question": True,
+         "evidence": "does not clean up the packet filtering rules"},
+        {"claim": "made up", "verdict": "supported", "evidence": "the rules are recreated on restart"},
+        {"claim": "no quote", "verdict": "supported", "evidence": ""},
+    ]  # fmt: skip
+    j, _ = judge(json.dumps({"claims": claims}))
+    score = await j.faithfulness("q", "a", [src])
+    assert j.unverified_evidence == 2 and score is not None and abs(score - 1 / 3) < 1e-9
+    assert [c.verdict for c in j.last_reply.claims] == ["supported", "unsupported", "unsupported"]  # type: ignore[union-attr]
+
+
+async def test_groq_json_validation_errors_are_bad_replies_not_crashes() -> None:
+    import httpx
+    import openai
+
+    def rejected() -> openai.BadRequestError:
+        resp = httpx.Response(400, request=httpx.Request("POST", "https://groq.test/v1"))
+        return openai.BadRequestError("Failed to validate JSON.", response=resp, body=None)
+
+    class Rejecting(FakeClient):
+        async def acomplete(self, messages: Any, **kw: Any) -> Any:
+            if not self.texts:
+                raise rejected()
+            return await super().acomplete(messages, **kw)
+
+    fake = Rejecting()
+    deepeval = cast(DeepEvalJudge, SimpleNamespace(relevancy_failures=0, no_statements=0))
+    j = RubricJudge(cast(ChatClient, fake), deepeval)
+    assert await j.faithfulness("q", "a", ["s"]) is None
+    assert j.faithfulness_failures == 1 and j.calls == 2
