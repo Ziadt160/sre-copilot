@@ -10,7 +10,8 @@ END = "<!-- results:end -->"
 
 EMPTY_NOTE = (
     "_No eval runs yet. Phase 1 fills this table with retrieval baselines: dense-only vs "
-    "keyword-only vs hybrid, per embedding model._"
+    "keyword-only
+vs hybrid, per embedding model._"
 )
 
 HEADER = (
