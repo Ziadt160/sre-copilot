@@ -88,7 +88,20 @@ def agreement_line(a: Mapping[str, str], b: Mapping[str, str], ids: Sequence[str
     )
 
 
-def export(dsn: str, run_id: int, n: int, seed: int, out: Path) -> int:
+def part_of(items: Sequence[Any], part: tuple[int, int] | None) -> list[Any]:
+    """Part i of N (1-based) of `items`, contiguous and as even as possible; all when None.
+    A full run is judged in parts: 69 answers do not fit one judging pass."""
+    if part is None:
+        return list(items)
+    i, n = part
+    if not 1 <= i <= n:
+        raise ValueError(f"part {i} of {n}")
+    return list(items[(i - 1) * len(items) // n : i * len(items) // n])
+
+
+def export(
+    dsn: str, run_id: int, n: int, seed: int, out: Path, part: tuple[int, int] | None = None
+) -> int:
     from sre_core.answer.prompts import group_sources, render_source
     from sre_evals.answers.label import LabelItem, labellable, stratified_sample
     from sre_shared.db import connect_sync
@@ -105,7 +118,7 @@ def export(dsn: str, run_id: int, n: int, seed: int, out: Path) -> int:
         return 2
     items = [LabelItem.from_detail(run_id, r["item_id"], r["details"]) for r in rows]
     results = {r["item_id"]: AnswerResult.model_validate(r["details"]["result"]) for r in rows}
-    chosen = stratified_sample(labellable(items), n, seed)
+    chosen = part_of(stratified_sample(labellable(items), n, seed), part)
     parts: list[str] = []
     index: list[dict[str, Any]] = []
     for pos, it in enumerate(chosen, 1):
@@ -169,6 +182,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ex.add_argument("--run", type=int, required=True)
     ex.add_argument("--sample", type=int, default=30)
     ex.add_argument("--seed", type=int, default=1)
+    ex.add_argument("--part", default=None, help="i/N: only part i of N of the sample")
     ex.add_argument("--out", type=Path, required=True)
     mg = sub.add_parser("merge", help="compare two passes; with --out, write the labels")
     mg.add_argument("--index", type=Path, required=True)
@@ -178,7 +192,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     mg.add_argument("--settle", nargs="*", default=[], help="item_id=label for each disagreement")
     args = ap.parse_args(argv)
     if args.cmd == "export":
-        return export(args.database_url, args.run, args.sample, args.seed, args.out)
+        part = tuple(int(x) for x in args.part.split("/")) if args.part else None
+        return export(args.database_url, args.run, args.sample, args.seed, args.out, part)  # type: ignore[arg-type]
     return merge(args.index, args.pass_a, args.pass_b, args.out, args.settle)
 
 

@@ -81,3 +81,13 @@ def test_merge_keeps_other_runs_and_replaces_this_packet(tmp_path: Path) -> None
         (10, "q1"), (11, "q1"), (11, "q2"), (11, "q3"),
     ]  # fmt: skip
     assert len(out.with_suffix(".pass-a.jsonl").read_text(encoding="utf-8").splitlines()) == 3
+
+
+def test_parts_cover_every_item_once_in_order() -> None:
+    items = list(range(69))
+    parts = [lp.part_of(items, (i, 3)) for i in (1, 2, 3)]
+    assert [len(p) for p in parts] == [23, 23, 23]
+    assert [x for p in parts for x in p] == items
+    assert lp.part_of(items, None) == items
+    with pytest.raises(ValueError):
+        lp.part_of(items, (4, 3))
