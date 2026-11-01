@@ -90,7 +90,25 @@ def plan_judge_tokens(answer_cfg: AnswerConfig, n_answers: int) -> int:
     return per * n_answers
 
 
-def summarize(runs: Sequence[ItemRun], n_items: int, judge_failures: int = 0) -> dict[str, Any]:
+JUDGE_COUNTERS = ("faithfulness_failures", "relevancy_failures", "no_claims", "no_statements")
+MAX_JUDGE_FAILURE_SHARE = 0.2
+
+
+class JudgeUnreliable(RuntimeError):
+    """The judge failed to produce a parseable score for too many judged answers."""
+
+
+def chunk_text(c: Any) -> str:
+    """The passage as the model saw it (T06-1: header, blank line, body)."""
+    return f"{c.header}\n\n{c.body}" if c.header else str(c.body)
+
+
+def summarize(
+    runs: Sequence[ItemRun],
+    n_items: int,
+    judge_failures: int = 0,
+    counts: Mapping[str, int] | None = None,
+) -> dict[str, Any]:
     answered = [r for r in runs if not r.result.abstained]
     faith = [r.faithfulness for r in runs if r.faithfulness is not None]
     rel = [r.relevancy for r in runs if r.relevancy is not None]
@@ -99,7 +117,9 @@ def summarize(runs: Sequence[ItemRun], n_items: int, judge_failures: int = 0) ->
         "n_items": n_items,
         "n_answered": len(answered),
         "n_abstained": len(runs) - len(answered),
+        "n_empty_answers": sum(1 for r in answered if not r.result.answer.strip()),
         "judge_failures": judge_failures,
+        **{k: int((counts or {}).get(k, 0)) for k in JUDGE_COUNTERS},
         "faithfulness": _mean(faith),
         "n_faithfulness": len(faith),
         "answer_relevancy": _mean(rel),
@@ -112,6 +132,16 @@ def summarize(runs: Sequence[ItemRun], n_items: int, judge_failures: int = 0) ->
         "completion_tokens": _mean([r.result.completion_tokens for r in runs]),
         "context_tokens": _mean([r.result.context_tokens for r in runs]),
         "latency_ms": latency_stats([r.result.timings_ms.get("total", 0.0) for r in runs]),
+    }
+    out["items"] = {
+        r.item.id: {
+            "faithfulness": r.faithfulness,
+            "answer_relevancy": r.relevancy,
+            "citation_hit": None if r.scores.citation_hit is None else float(r.scores.citation_hit),
+            "cited": None if r.result.abstained else float(r.scores.cited),
+            "abstained": float(r.result.abstained),
+        }
+        for r in runs
     }
     strata: dict[str, list[ItemRun]] = {}
     for r in runs:
@@ -165,6 +195,7 @@ def _score_rows(run_id: int, r: ItemRun) -> list[list[Any]]:
                 "k8s_version": c.k8s_version,
                 "title": c.title,
                 "url": c.url,
+                "header": c.header,
                 "body": c.body,
             }
             for c in res.context
@@ -193,7 +224,7 @@ async def _one(
     result = await answerer.answer(req, claims)
     run = ItemRun(item, result, score_answer(result, item))
     if judge is not None and not result.abstained and result.answer.strip():
-        contexts = [c.body for c in result.context]
+        contexts = [chunk_text(c) for c in result.context]
         run.faithfulness = await judge.faithfulness(item.question, result.answer, contexts)
         run.relevancy = await judge.relevancy(item.question, result.answer)
     return run
@@ -213,9 +244,12 @@ async def run_answers(
     concurrency: int = 1,
     claims: Claims = ANONYMOUS,
     extra: Mapping[str, Any] | None = None,
+    max_judge_failure_share: float = MAX_JUDGE_FAILURE_SHARE,
 ) -> list[AnswerRunOutcome]:
     """Answer and score every item `repeat` times; one stored `kind='answer'` run per repeat.
-    An answerer or quota error stores a `failed` run (no scores) and re-raises."""
+    An answerer, judge-transport or quota error stores a `failed` run (no scores) and re-raises;
+    so does a judge that fails to parse more than `max_judge_failure_share` of the judged
+    answers (`JudgeUnreliable`)."""
     acfg = answer_cfg or cfg.answer or AnswerConfig()
     batch = uuid.uuid4().hex[:12]
     outcomes: list[AnswerRunOutcome] = []
@@ -239,9 +273,11 @@ async def run_answers(
             "judge_prompt_version": JUDGE_PROMPT_VERSION,
             "metric_version": metric_version(),
             "answer_prompt_version": acfg.prompt_version,
+            "golden_version": golden_version,
             **(extra or {}),
         }
-        failures_before = getattr(judge, "failures", 0)
+        before = {k: int(getattr(judge, k, 0)) for k in JUDGE_COUNTERS}
+        before_total = int(getattr(judge, "failures", 0))
 
         async def guarded(item: GoldenItem) -> ItemRun:
             async with sem:
@@ -251,6 +287,15 @@ async def run_answers(
 
         try:
             runs = list(await asyncio.gather(*(guarded(i) for i in items)))
+            counts = {k: int(getattr(judge, k, 0)) - before[k] for k in JUDGE_COUNTERS}
+            failures = int(getattr(judge, "failures", 0)) - before_total
+            judged = sum(1 for r in runs if not r.result.abstained and r.result.answer.strip())
+            worst = max(counts["faithfulness_failures"], counts["relevancy_failures"])
+            if judged and worst / judged > max_judge_failure_share:
+                raise JudgeUnreliable(
+                    f"{worst} of {judged} judged answers got no parseable score from"
+                    f" {meta['judge']} (limit {max_judge_failure_share:.0%})"
+                )
         except Exception as e:
             stamps.corpus_version_id = None
             await _insert_run(
@@ -258,7 +303,7 @@ async def run_answers(
                 {"error": f"{type(e).__name__}: {e}", **meta}, "answer",
             )  # fmt: skip
             raise
-        summary = summarize(runs, len(items), getattr(judge, "failures", 0) - failures_before)
+        summary = summarize(runs, len(items), failures, counts)
         summary.update(meta)
         corpus_ids = {r.result.corpus_version_id for r in runs}
         stamps.corpus_version_id = next(iter(corpus_ids)) if len(corpus_ids) == 1 else None

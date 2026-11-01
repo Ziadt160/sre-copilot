@@ -197,9 +197,11 @@ def test_run_refuses_an_over_budget_hosted_judge_before_any_database_or_model_ca
 
 
 def test_baseline_experiment_loads_as_an_answer_config() -> None:
+    from sre_evals.answers.cli import load_answer_experiments
     from sre_evals.runner import load_experiments
 
-    cfg = load_experiments()["answer-k5"]
+    assert "answer-k5" not in load_experiments()  # `retrieval --all` never sees answer configs
+    cfg = load_answer_experiments()["answer-k5"]
     assert cfg.legs == ["dense"] and cfg.answer is not None
     assert (cfg.answer.k, cfg.answer.compression) == (5, "none")
     assert W(1, 2) == "w1 w2"

@@ -28,7 +28,7 @@ from sre_evals.answers.label import (
 )
 from sre_evals.answers.runner import plan_judge_tokens, run_answers
 from sre_evals.golden.review import StdTerminal
-from sre_evals.runner import load_experiments
+from sre_evals.runner import ExperimentConfig, experiments_dir, load_experiment
 from sre_shared.aio import run
 from sre_shared.config import load_answer_config
 from sre_shared.db import connect, create_pool
@@ -50,6 +50,13 @@ def _client(spec: str) -> ChatClient:
         return ChatClient(parse_model_spec(spec))
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
+
+
+def load_answer_experiments() -> dict[str, ExperimentConfig]:
+    """Answer experiments live in `config/experiments/answers/`, apart from the retrieval ones
+    (the retrieval loader reads only the top-level directory, so `retrieval --all` skips them)."""
+    folder = experiments_dir() / "answers"
+    return {c.name: c for c in (load_experiment(p) for p in sorted(folder.glob("*.yaml")))}
 
 
 def _fmt(x: float | None) -> str:
@@ -94,7 +101,7 @@ def run_cmd(
     database_url: DbOption = None,
 ) -> None:
     """Answer the golden items with an AnswererLike and score the answers."""
-    configs = load_experiments()
+    configs = load_answer_experiments()
     if experiment not in configs:
         raise typer.BadParameter(f"unknown experiment {experiment!r}; have {sorted(configs)}")
     cfg = configs[experiment]

@@ -135,7 +135,6 @@ def _item_run(item: Any, faith: float | None, *, abstained: bool = False) -> Ite
     return ItemRun(item, res, score_answer(res, item), faithfulness=faith, relevancy=faith)
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F3: noise compares means over different item sets")
 def test_noise_spread_uses_the_same_items_in_every_repeat() -> None:
     # The judge gives every item the same score in both repeats; in repeat 2 it fails to score
     # one item (None). Nothing about the judged answers varied, yet the report shows a spread.
@@ -170,7 +169,6 @@ def test_citation_hit_cited_invalid_abstained_from_answer_result() -> None:
     assert score_answer(result(q, "x [1]", [other], [3]), item).citation_hit is False
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F6: unjudged answered items are not accounted for")
 async def test_every_answered_item_left_out_of_the_judged_mean_is_counted() -> None:
     def script(req: AnswerRequest) -> AnswerResult:
         ctx = [chunk(1, W(1, 12))]
@@ -185,14 +183,16 @@ async def test_every_answered_item_left_out_of_the_judged_mean_is_counted() -> N
     ]
     s = summarize(runs, 2, judge.failures)
     assert (s["n_answered"], s["n_faithfulness"], s["judge_failures"]) == (2, 1, 0)
-    # One answered item is in neither the judged mean nor the failure count.
-    assert s["n_answered"] == s["n_faithfulness"] + s["judge_failures"]
+    # The answered item that was left out of the judged mean is counted as an empty answer.
+    # (Amended: the original assertion `n_answered == n_faithfulness + judge_failures` said
+    # 2 == 1 + 0 right after asserting those very values, so it could not hold.)
+    assert s["n_empty_answers"] == 1
+    assert s["n_answered"] == s["n_faithfulness"] + s["judge_failures"] + s["n_empty_answers"]
 
 
 # -- 5. storage ----------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F7: stored context omits the chunk header")
 def test_stored_context_is_what_the_model_saw() -> None:
     item = ITEMS4[0]
     run = _item_run(item, 1.0)
@@ -258,21 +258,18 @@ async def test_quota_hit_mid_run_stores_a_failed_answer_run(db: Any) -> None:
     assert "QuotaExceeded" in rows[0]["summary"]["error"]
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F4: transport errors are swallowed as judge failures")
 async def test_an_unreachable_judge_is_an_error_not_a_score_gap() -> None:
     judge = build_judge(_replying_client({}, error=ConnectionError("connection refused")))
     with pytest.raises(ConnectionError):
         await judge.faithfulness("q", "a", ["p"])
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F2: zero extracted claims scores 1.0")
 async def test_an_answer_with_no_extracted_claims_is_not_scored_fully_faithful() -> None:
     judge = build_judge(_replying_client({**BASE_REPLIES, "claims": {"claims": []}}))
     score = await judge.faithfulness("q", "Some answer with claims.", ["p"])
     assert score is None, score  # today: 1.0 -> 'supported' in calibration
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F2: borderline (unsupported) claims count as faithful")
 async def test_claims_the_passages_do_not_support_are_not_scored_supported() -> None:
     verdicts = {"verdicts": [{"verdict": "borderline"}, {"verdict": "borderline"}]}
     judge = build_judge(_replying_client({**BASE_REPLIES, "verdicts": verdicts}))
@@ -297,7 +294,6 @@ def test_local_judge_is_never_blocked_and_hosted_is_refused_before_a_call() -> N
 # -- 7. report -----------------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F5: two-halves split depends on which items scored")
 def test_two_halves_are_fixed_across_experiments() -> None:
     full = {"fac-0001": 1.0, "fac-0002": 0.0, "fac-0003": 1.0, "fac-0004": 0.0}
     x = AnswerExperiment("answer-x", [], {"faithfulness": full})
@@ -310,17 +306,16 @@ def test_two_halves_are_fixed_across_experiments() -> None:
 
 
 def test_report_answered_column_is_from_repeat_one_only() -> None:
-    """Documents (not a strict failure) that `Answered` ignores later repeats (finding F8)."""
+    """F8: `Answered` covers all repeats (a range), not repeat 1 only."""
     runs = []
     for rep, n_ans in ((1, 4), (2, 2)):
         runs.append({"experiment": "answer-x", "repeat": rep, "model": "m", "judge": "j",
                      "n_answered": n_ans, "n_items": 4, "abstain_rate": 1 - n_ans / 4,
                      "latency_ms": {"p50": 1.0}})  # fmt: skip
     text = "\n".join(render_answer_sections(AnswerData([AnswerExperiment("answer-x", runs)])))
-    assert "| 4/4 |" in text and "| 0.250 |" in text  # answered 4/4 next to abstain 0.250
+    assert "| 2-4/4 |" in text and "| 0.250 |" in text
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F9: labels whose answer is missing vanish silently")
 async def test_calibration_counts_labels_it_could_not_join() -> None:
     p = (Passage(1, "s", "1.33", "t", "u", "body"),)
     items = [LabelItem(7, "fac-0001", "factual", "q", "a", p)]
@@ -358,7 +353,6 @@ def test_stratified_sample_size_determinism_and_coverage() -> None:
                 assert set(Counter(i.stratum for i in got)) == {f"s{s}" for s in range(len(sizes))}
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F1: a session rewrites the file without other labels")
 def test_labelling_one_run_keeps_the_labels_of_another_run(tmp_path: Path) -> None:
     out = tmp_path / "labels.jsonl"
     first = LabelSession.open([_li("fac-0001", "factual", run_id=12)], out, "ziad")
@@ -371,7 +365,6 @@ def test_labelling_one_run_keeps_the_labels_of_another_run(tmp_path: Path) -> No
     assert keys == {(12, "fac-0001"), (15, "fac-0001")}, keys  # today: run 12's label is gone
 
 
-@pytest.mark.xfail(strict=True, reason="V05 F10: undo after a duplicated line raises KeyError")
 def test_undo_survives_a_duplicated_label_line(tmp_path: Path) -> None:
     out = tmp_path / "labels.jsonl"
     line = {"run_id": 7, "item_id": "fac-0001", "stratum": "factual", "labeller": "z",

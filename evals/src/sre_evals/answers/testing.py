@@ -92,6 +92,10 @@ class FakeJudge:
     seen: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
     failures: int = 0
 
+    @property
+    def faithfulness_failures(self) -> int:
+        return self.failures
+
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
     ) -> float | None:

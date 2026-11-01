@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from importlib.metadata import version
 from typing import Any, Protocol
 
+import httpx
+import openai
 from deepeval.metrics import AnswerRelevancyMetric, FaithfulnessMetric
 from deepeval.models import DeepEvalBaseLLM
 from deepeval.test_case import LLMTestCase
@@ -26,7 +28,7 @@ from pydantic import BaseModel
 from sre_evals.golden.llm import JsonReplyError, parse_reply
 from sre_shared.llm import ChatClient, QuotaExceeded
 
-JUDGE_PROMPT_VERSION = "judge-v1"
+JUDGE_PROMPT_VERSION = "judge-v2"  # v2: ambiguous claims penalised, empty claims -> None
 JUDGE_MAX_TOKENS = 1024
 # Faithfulness makes about three calls per answer (truths, claims, verdicts), relevancy two.
 FAITHFULNESS_CALLS = 3
@@ -135,33 +137,58 @@ class DeepEvalJudge:
 
     llm: DeepEvalBaseLLM
     label: str
-    failures: int = 0
+    faithfulness_failures: int = 0  # reply not parseable against the schema
+    relevancy_failures: int = 0
+    no_claims: int = 0  # the judge extracted no claim from a non-empty answer
+    no_statements: int = 0
 
-    async def _score(self, metric: Any, case: LLMTestCase) -> float | None:
+    @property
+    def failures(self) -> int:
+        return self.faithfulness_failures + self.relevancy_failures
+
+    async def _score(self, metric: Any, case: LLMTestCase, *, extracted: str) -> float | None:
+        """None when the judge's reply could not be parsed (counted as a failure) or it
+        extracted nothing to judge (counted in `no_claims` / `no_statements`). Transport
+        problems (connection, auth, timeout) are not scores: they propagate."""
         try:
             await metric.a_measure(case, _show_indicator=False)
-        except QuotaExceeded:
+        except (QuotaExceeded, openai.APIError, httpx.HTTPError, OSError):
             raise
-        except Exception:  # a judge that cannot answer in the schema counts as a failure
-            self.failures += 1
+        except (ValueError, KeyError, TypeError):  # JsonReplyError, ValidationError, bad JSON
+            if extracted == "claims":
+                self.faithfulness_failures += 1
+            else:
+                self.relevancy_failures += 1
             return None
+        if not getattr(metric, extracted, None):
+            if extracted == "claims":
+                self.no_claims += 1
+            else:
+                self.no_statements += 1
+            return None  # DeepEval scores "nothing to check" as 1.0; that is not faithfulness
         score = metric.score
         return None if score is None else float(score)
 
     async def faithfulness(
         self, question: str, answer: str, contexts: Sequence[str]
     ) -> float | None:
+        # "The passages do not say" is not support: the labeller's `s` needs every claim backed.
         metric = FaithfulnessMetric(
-            model=self.llm, include_reason=False, async_mode=True, verbose_mode=False
+            model=self.llm,
+            include_reason=False,
+            async_mode=True,
+            verbose_mode=False,
+            penalize_ambiguous_claims=True,
         )
         case = LLMTestCase(input=question, actual_output=answer, retrieval_context=list(contexts))
-        return await self._score(metric, case)
+        return await self._score(metric, case, extracted="claims")
 
     async def relevancy(self, question: str, answer: str) -> float | None:
         metric = AnswerRelevancyMetric(
             model=self.llm, include_reason=False, async_mode=True, verbose_mode=False
         )
-        return await self._score(metric, LLMTestCase(input=question, actual_output=answer))
+        case = LLMTestCase(input=question, actual_output=answer)
+        return await self._score(metric, case, extracted="statements")
 
 
 def build_judge(client: ChatClient) -> DeepEvalJudge:

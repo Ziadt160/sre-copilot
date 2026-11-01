@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from sre_evals.answers.report import fetch_answer_data, render_answer_sections
-from sre_evals.answers.runner import plan_judge_tokens, run_answers
+from sre_evals.answers.runner import JudgeUnreliable, plan_judge_tokens, run_answers
 from sre_evals.answers.testing import SRC, VER, FakeAnswerer, FakeJudge, W, chunk, golden, result
 from sre_evals.report import build_reports
 from sre_evals.runner.config import ExperimentConfig
@@ -57,7 +57,9 @@ async def test_run_stores_answer_run_and_scores(db: Any) -> None:
     assert s["answer_relevancy"] == pytest.approx(0.75)
     assert len(judge.seen) == 3 and all(q != "question unans-0001" for q, _ in judge.seen)
     # The judge is given exactly the chunk bodies the model was given, in order.
-    assert all(c == (GOLD_A, "noise noise", GOLD_B) for _, c in judge.seen)
+    # ...with the header the model saw (the test chunks have header "h").
+    expected = (f"h\n\n{GOLD_A}", "h\n\nnoise noise", f"h\n\n{GOLD_B}")
+    assert all(c == expected for _, c in judge.seen)
     # Cited: 2 of 3 answered items cite something. Citation hit: only fac-0001 cites a gold chunk
     # among the three items with gold (fac-0002 cites nothing, exs-0001 cites noise).
     assert s["cited_rate"] == pytest.approx(2 / 3)
@@ -145,9 +147,32 @@ async def test_judge_failure_is_counted_and_skipped(db: Any) -> None:
     await create_corpus_version(db)
     judge = FakeJudge(faith={"question fac-0001": None})
     [out] = await run_answers(
-        cfg(), ITEMS, FakeAnswerer(script), db, judge=judge, loop="local", golden_version="v1"
+        cfg(),
+        ITEMS,
+        FakeAnswerer(script),
+        db,
+        judge=judge,
+        loop="local",
+        golden_version="v1",
+        max_judge_failure_share=0.5,
     )
     assert out.summary["judge_failures"] == 1 and out.summary["n_faithfulness"] == 2
+    assert out.summary["faithfulness_failures"] == 1 and out.summary["relevancy_failures"] == 0
+
+
+async def test_too_many_judge_failures_store_a_failed_run(db: Any) -> None:
+    await create_corpus_version(db)
+    judge = FakeJudge(faith={"question fac-0001": None})  # 1 of 3 judged answers = 33% > 20%
+    with pytest.raises(JudgeUnreliable):
+        await run_answers(
+            cfg(), ITEMS, FakeAnswerer(script), db, judge=judge, loop="local", golden_version="v1"
+        )
+    row = await (
+        await db.execute(
+            "select status, summary from public.eval_runs where kind = 'answer' order by id desc"
+        )
+    ).fetchone()
+    assert row["status"] == "failed" and "JudgeUnreliable" in row["summary"]["error"]
 
 
 async def test_answerer_error_stores_failed_run_and_reraises(db: Any) -> None:

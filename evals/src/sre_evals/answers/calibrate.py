@@ -67,6 +67,7 @@ class JudgeAgreement:
     kappa_binary: float | None = None
     vs_reference: dict[str, float | None] = field(default_factory=dict)
     labels: dict[tuple[int, str], str] = field(default_factory=dict, repr=False)
+    human: dict[tuple[int, str], str] = field(default_factory=dict, repr=False)  # joined labels
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -82,7 +83,7 @@ class JudgeAgreement:
 
 def plan_tokens(items: Sequence[LabelItem]) -> int:
     return sum(
-        estimate_judge_tokens(i.answer, [p.body for p in i.passages], relevancy=False)
+        estimate_judge_tokens(i.answer, [p.text for p in i.passages], relevancy=False)
         for i in items
     )
 
@@ -103,6 +104,7 @@ def agreement(
     j = [str(judged[k]) for k in keys]
     out = JudgeAgreement(name, n=len(keys), n_failed=len(human) - len(keys))
     out.labels = {k: str(judged[k]) for k in keys}
+    out.human = dict(human)
     out.accuracy, out.kappa = accuracy(h, j), cohens_kappa(h, j)
     hb, jb = [to_binary(x) for x in h], [to_binary(x) for x in j]
     out.accuracy_binary, out.kappa_binary = accuracy(hb, jb), cohens_kappa(hb, jb)
@@ -135,7 +137,7 @@ async def calibrate(
         ) -> tuple[tuple[int, str], str | None]:
             async with sem:
                 score = await judge.faithfulness(
-                    item.question, item.answer, [p.body for p in item.passages]
+                    item.question, item.answer, [p.text for p in item.passages]
                 )
             return item.key, None if score is None else score_to_label(score)
 
@@ -163,13 +165,18 @@ def calibration_summary(
     labels_file: str,
     reference: str | None,
 ) -> dict[str, Any]:
+    """`n_labels` and the distribution cover the labels that joined a stored answer;
+    `n_unjoined` counts the ones that did not (their run or item is gone)."""
+    joined = results[0].human if results else {(lab.run_id, lab.item_id): "" for lab in labels}
+    used = [lab for lab in labels if (lab.run_id, lab.item_id) in joined]
     dist: dict[str, int] = {SUPPORTED: 0, PARTLY: 0, NOT_SUPPORTED: 0}
-    for lab in labels:
+    for lab in used:
         dist[lab.label] += 1
     return {
         "labels_file": labels_file,
-        "n_labels": len(labels),
-        "labellers": sorted({lab.labeller for lab in labels}),
+        "n_labels": len(used),
+        "n_unjoined": len(labels) - len(used),
+        "labellers": sorted({lab.labeller for lab in used}),
         "human_distribution": dist,
         "reference": reference,
         "judges": {r.name: r.as_dict() for r in results},

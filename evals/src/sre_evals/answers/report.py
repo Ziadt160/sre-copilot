@@ -33,6 +33,7 @@ class AnswerExperiment:
     experiment: str
     runs: list[dict[str, Any]]  # summaries of the batch's repeats, repeat order
     per_item: dict[str, dict[str, float]] = field(default_factory=dict)  # metric -> item -> mean
+    folds: dict[str, str] = field(default_factory=dict)  # item -> 'A' | 'B' (all run items)
 
 
 @dataclass
@@ -60,6 +61,8 @@ async def fetch_answer_data(conn: AsyncConnection[Any]) -> AnswerData:
         ]
         runs.sort(key=lambda r: int(r["summary"].get("repeat", 1)))
         exp = AnswerExperiment(name, [r["summary"] for r in runs])
+        # The halves come from every item the run covered, not from the ones that got a score.
+        exp.folds = fold_of(sorted({i for r in runs for i in r["summary"].get("items", {})}))
         cur = await conn.execute(
             "select item_id, metric, avg(value) as value from public.eval_scores"
             " where run_id = any(%s) and metric = any(%s) group by item_id, metric",
@@ -95,16 +98,69 @@ def _signed(x: float) -> str:
     return f"{x:+.3f}"
 
 
+def _fold(exp: AnswerExperiment, item_id: str) -> str:
+    """Fixed half of an item. Stored runs know all their items (`exp.folds`); without that,
+    fall back to the parity of the id's number, which also never depends on what was scored."""
+    if item_id in exp.folds:
+        return exp.folds[item_id]
+    digits = "".join(ch for ch in item_id.rsplit("-", 1)[-1] if ch.isdigit())
+    return "A" if digits and int(digits) % 2 == 1 else "B"
+
+
 def _halves(exp: AnswerExperiment, metric: str) -> str:
     values = exp.per_item.get(metric, {})
     if not values:
         return "-"
-    folds = fold_of(list(values))
     parts = []
     for half in "AB":
-        v = [x for i, x in values.items() if folds[i] == half]
+        v = [x for i, x in values.items() if _fold(exp, i) == half]
         parts.append(_f(sum(v) / len(v)) if v else "-")
     return " / ".join(parts)
+
+
+JUDGE_KEYS = ("judge", "judge_prompt_version", "metric_version", "golden_version")
+NOISE_ITEM_METRICS = ("faithfulness", "answer_relevancy", "citation_hit", "cited", "abstained")
+
+
+def _not_comparable(a: AnswerExperiment, b: AnswerExperiment) -> str | None:
+    """Why two experiments' scores must not be paired (None: they can be)."""
+    diff = [k for k in JUDGE_KEYS if a.runs[0].get(k) != b.runs[0].get(k)]
+    return ", ".join(diff) if diff else None
+
+
+def _noise_rows(e: AnswerExperiment) -> list[list[str]]:
+    """Per metric, the per-repeat mean over the items scored in EVERY repeat, then the spread of
+    those means. Without per-item data (old runs) the stored summary means are used."""
+    rows: list[list[str]] = []
+    items: list[dict[str, dict[str, float | None]]] = [r.get("items") or {} for r in e.runs]
+    if all(items):
+        for m in NOISE_ITEM_METRICS:
+            common = set.intersection(
+                *({i for i, v in it.items() if v.get(m) is not None} for it in items)
+            )
+            if not common:
+                continue
+            means = [{m: sum(float(it[i][m] or 0) for i in common) / len(common)} for it in items]
+            s = noise_stats(means)[m]
+            rows.append([
+                f"`{e.experiment}`", m, str(s.n), str(len(common)), _f(s.mean), _f(s.min),
+                _f(s.max), _f(s.stdev),
+            ])  # fmt: skip
+        return rows
+    stats = noise_stats(
+        [{m: float(r[m]) for m in SUMMARY_METRICS if r.get(m) is not None} for r in e.runs]
+    )
+    return [
+        [f"`{e.experiment}`", m, str(s.n), "-", _f(s.mean), _f(s.min), _f(s.max), _f(s.stdev)]
+        for m, s in stats.items()
+    ]
+
+
+def _answered(runs: Sequence[Mapping[str, Any]]) -> str:
+    vals = [int(r.get("n_answered", 0)) for r in runs]
+    lo, hi = min(vals), max(vals)
+    n = runs[0].get("n_items", 0)
+    return f"{hi}/{n}" if lo == hi else f"{lo}-{hi}/{n}"
 
 
 def render_answer_sections(data: AnswerData) -> list[str]:
@@ -127,7 +183,7 @@ def render_answer_sections(data: AnswerData) -> list[str]:
             r0 = e.runs[0]
             rows.append([
                 f"`{e.experiment}`", str(r0.get("model", "-")), str(r0.get("judge", "-")),
-                str(len(e.runs)), f"{r0.get('n_answered', 0)}/{r0.get('n_items', 0)}",
+                str(len(e.runs)), _answered(e.runs),
                 _f(_mean_over_runs(e.runs, "faithfulness")),
                 _f(_mean_over_runs(e.runs, "answer_relevancy")),
                 _f(_mean_over_runs(e.runs, "citation_hit_rate")),
@@ -162,7 +218,11 @@ def render_answer_sections(data: AnswerData) -> list[str]:
             rows = []
             for e in others:
                 cells = [f"`{e.experiment}`"]
+                why = _not_comparable(e, base)
                 for m in PAIRED_METRICS:
+                    if why:
+                        cells.append(f"not comparable ({why} differs)")
+                        continue
                     a, b = e.per_item.get(m, {}), base.per_item.get(m, {})
                     common = sorted(a.keys() & b.keys())
                     ci = paired_bootstrap_ci([a[i] - b[i] for i in common])
@@ -176,24 +236,44 @@ def render_answer_sections(data: AnswerData) -> list[str]:
                         )
                 rows.append(cells)
             lines += _table(["Experiment", *PAIRED_METRICS], rows)
+            if base.experiment != BASELINE:
+                lines += ["", f"_`{BASELINE}` has no run: the baseline is `{base.experiment}`._"]
+            half_rows = []
+            for e in others:
+                if _not_comparable(e, base):
+                    continue
+                a, b = e.per_item.get("faithfulness", {}), base.per_item.get("faithfulness", {})
+                cells = [f"`{e.experiment}`"]
+                for half in "AB":
+                    d = [a[i] - b[i] for i in sorted(a.keys() & b.keys()) if _fold(base, i) == half]
+                    cells.append(f"{_signed(sum(d) / len(d))} (n={len(d)})" if d else "-")
+                half_rows.append(cells)
+            if half_rows:
+                lines += ["", "Faithfulness difference per fixed half of the golden set:", ""]
+                lines += _table(["Experiment", "Half A", "Half B"], half_rows)
 
         noisy = [e for e in exps if len(e.runs) > 1]
         lines += ["", "### Noise (same commit, repeated runs)", ""]
         if noisy:
-            rows = []
-            for e in noisy:
-                stats = noise_stats(
-                    [
-                        {m: float(r[m]) for m in SUMMARY_METRICS if r.get(m) is not None}
-                        for r in e.runs
-                    ]
-                )
-                for m, s in stats.items():
-                    rows.append([
-                        f"`{e.experiment}`", m, str(s.n), _f(s.mean), _f(s.min), _f(s.max),
-                        _f(s.stdev),
-                    ])  # fmt: skip
-            lines += _table(["Experiment", "Metric", "Runs", "Mean", "Min", "Max", "Stdev"], rows)
+            rows = [row for e in noisy for row in _noise_rows(e)]
+            lines += _table(
+                [
+                    "Experiment",
+                    "Metric",
+                    "Runs",
+                    "Items",
+                    "Mean",
+                    "Min",
+                    "Max",
+                    "Stdev (sample, n-1)",
+                ],
+                rows,
+            )
+            lines += [
+                "",
+                "Each repeat's mean covers only the items scored in every repeat (`Items`), so"
+                " a judge failure or an abstention in one repeat does not show up as spread.",
+            ]
             lines += [
                 "",
                 "A difference between two experiments smaller than this spread is not a result.",
@@ -214,7 +294,13 @@ def render_answer_sections(data: AnswerData) -> list[str]:
             f"not supported {dist['not_supported']}). Judge score to label: >= "
             f"{t['supported_min']:g} supported, >= {t['partly_min']:g} partly, else not "
             f"supported. Judge prompt `{cal['judge_prompt_version']}`, "
-            f"metrics `{cal['metric_version']}`. Target kappa {KAPPA_TARGET:g}.",
+            f"metrics `{cal['metric_version']}`. Target kappa {KAPPA_TARGET:g}."
+            + (
+                f" {cal['n_unjoined']} labels could not be matched to a stored answer and are"
+                " left out."
+                if cal.get("n_unjoined")
+                else ""
+            ),
             "",
         ]
         rows = []

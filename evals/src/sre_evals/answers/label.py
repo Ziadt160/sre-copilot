@@ -47,6 +47,12 @@ class Passage:
     title: str
     url: str
     body: str
+    header: str = ""
+
+    @property
+    def text(self) -> str:
+        """The passage as the model saw it: header, blank line, body."""
+        return f"{self.header}\n\n{self.body}" if self.header else self.body
 
 
 @dataclass(frozen=True)
@@ -80,6 +86,7 @@ class LabelItem:
                     title=p["title"],
                     url=p["url"],
                     body=p["body"],
+                    header=p.get("header", ""),
                 )
                 for p in d["context"]
             ),
@@ -190,6 +197,7 @@ class LabelSession:
     queue: list[LabelItem] = field(default_factory=list)
     message: str = ""
     _order: list[tuple[int, str]] = field(default_factory=list)
+    _kept: list[Label] = field(default_factory=list)  # labels outside this sample
 
     @classmethod
     def open(
@@ -204,9 +212,14 @@ class LabelSession:
             s.now = now
         keys = {i.key for i in items}
         for lab in read_labels(out_path):
-            if (lab.run_id, lab.item_id) in keys:
-                s.decided[(lab.run_id, lab.item_id)] = lab
-                s._order.append((lab.run_id, lab.item_id))
+            key = (lab.run_id, lab.item_id)
+            if key not in keys:
+                s._kept.append(lab)  # another run or sample: never dropped from the file
+                continue
+            if key in s.decided:  # a duplicated line: the last one wins, one undo entry
+                s._order.remove(key)
+            s.decided[key] = lab
+            s._order.append(key)
         s.queue = [i for i in items if i.key not in s.decided]
         return s
 
@@ -219,7 +232,7 @@ class LabelSession:
         return not self.queue
 
     def _save(self) -> None:
-        write_labels(self.out_path, [self.decided[k] for k in self._order])
+        write_labels(self.out_path, [*self._kept, *(self.decided[k] for k in self._order)])
 
     def label(self, label: str) -> None:
         if label not in LABELS:
@@ -277,7 +290,7 @@ def render(session: LabelSession, console: Console) -> None:
                 f"chunk {p.chunk_id}  {p.title}  v{p.k8s_version}  {p.source_path}",
             )
         )
-        body.append(Text(p.body))
+        body.append(Text(p.text))
     console.print(
         Panel(
             Group(*body), title=f"{it.item_id} [{it.stratum}] run {it.run_id}", subtitle=KEYS_HELP
