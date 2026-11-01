@@ -5,7 +5,10 @@
 // deno-lint-ignore no-explicit-any
 declare const Supabase: any;
 
-const MAX_TEXTS = 64;
+// The Edge Runtime cancels a request at its CPU-time limit; a handful of near-512-token
+// texts already reaches it, so callers send one text per request by default
+// (sre_core.retrieval.edge, batch_size=1); one ~500-token text takes ~0.45 s.
+const MAX_TEXTS = 8;
 const session = new Supabase.ai.Session("gte-small");
 
 const json = (body: unknown, status = 200) =>

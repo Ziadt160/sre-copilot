@@ -84,9 +84,7 @@ def test_edge_function_matches_onnx() -> None:
 
     edge = EdgeFunctionEmbedder(timeout=120.0)
     try:
-        got = np.concatenate(
-            [edge.embed_queries(texts[i : i + 16]) for i in range(0, len(texts), 16)]
-        )
+        got = edge.embed_queries(texts, batch_size=1)
     except httpx.HTTPError as exc:  # pragma: no cover - lab only
         pytest.fail(f"edge function unreachable or failing: {exc}")
     want = onnx.embed_queries(texts)
