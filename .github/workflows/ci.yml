@@ -1,0 +1,191 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+  # Same image the lab stack runs; keep in step with sre_shared.testing.pg.SUPABASE_PG_IMAGE.
+  PG_IMAGE: public.ecr.aws/supabase/postgres:17.11.0.006
+  HF_HOME: ${{ github.workspace }}/.cache/huggingface
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v5.4.1
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run lint-imports
+
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      testdb:
+        image: public.ecr.aws/supabase/postgres:17.11.0.006
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 54400:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 20s
+    env:
+      SRE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54400/postgres
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v5.4.1
+        with:
+          enable-cache: true
+      - run: uv sync
+      # The supabase image restarts once while initialising; wait until a real login works.
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 60); do
+            if uv run python -c "import os, psycopg; psycopg.connect(os.environ['SRE_TEST_DATABASE_URL'], connect_timeout=3).execute('select 1')"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres did not become ready" >&2
+          exit 1
+      - name: Unit and integration tests
+        run: uv run pytest -m "not lab and not gpu and not models"
+      - name: Cache Hugging Face models
+        uses: actions/cache@v4.2.0
+        with:
+          path: ${{ env.HF_HOME }}
+          key: hf-models-${{ hashFiles('packages/shared/src/sre_shared/embed/base.py') }}
+      - name: Model tests
+        run: uv run pytest -m models
+
+  retrieval-gate:
+    runs-on: ubuntu-24.04
+    needs: [test]
+    services:
+      testdb:
+        image: public.ecr.aws/supabase/postgres:17.11.0.006
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 54400:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 20s
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54400/postgres
+      SRE_ENV: ci
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - name: Check the golden set and baseline exist
+        id: ready
+        run: |
+          golden=evals/golden/v1/items.jsonl
+          accepted=0
+          if [ -f "$golden" ]; then accepted=$(grep -c '"status":"accepted"' "$golden" || true); fi
+          baseline=$(tr -d '[:space:]' < evals/baselines/retrieval.json 2>/dev/null || echo '{}')
+          if [ "$accepted" -eq 0 ]; then
+            echo "::notice title=Retrieval gate skipped::golden set v1 has no accepted items yet"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          elif [ "$baseline" = "{}" ] || [ -z "$baseline" ]; then
+            echo "::notice title=Retrieval gate skipped::evals/baselines/retrieval.json is empty ({}); write it with 'sre-eval baseline' after review"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: astral-sh/setup-uv@v5.4.1
+        if: steps.ready.outputs.run == 'true'
+        with:
+          enable-cache: true
+      - name: Install
+        if: steps.ready.outputs.run == 'true'
+        run: uv sync
+      - name: Create the schema
+        if: steps.ready.outputs.run == 'true'
+        run: |
+          for i in $(seq 1 60); do
+            if uv run python -c "import os, psycopg; psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=3).execute('select 1')"; then break; fi
+            sleep 2
+          done
+          uv run python - <<'PY'
+          import os
+          from sre_shared.testing.pg import BOOTSTRAP_SQL, apply_sql_files, migration_files
+          apply_sql_files(os.environ["DATABASE_URL"], [BOOTSTRAP_SQL, *migration_files()])
+          PY
+      - name: Cache Hugging Face models
+        if: steps.ready.outputs.run == 'true'
+        uses: actions/cache@v4.2.0
+        with:
+          path: ${{ env.HF_HOME }}
+          key: hf-models-${{ hashFiles('packages/shared/src/sre_shared/embed/base.py') }}
+      # The corpus is pinned in config/corpus.yaml; the snapshot is keyed by that file, the
+      # ingest sources (chunker) and the embedding model, so any change rebuilds it.
+      - name: Restore corpus snapshot
+        id: snapshot
+        if: steps.ready.outputs.run == 'true'
+        uses: actions/cache@v4.2.0
+        with:
+          path: data/snapshot
+          key: corpus-${{ hashFiles('config/corpus.yaml') }}-${{ hashFiles('services/ingest/src/**') }}-gte-small
+      - name: Load corpus snapshot
+        if: steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit == 'true'
+        run: uv run sre-ingest snapshot load data/snapshot
+      - name: Build corpus (cache miss)
+        if: steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit != 'true'
+        run: |
+          uv run sre-ingest run --models gte-small
+          uv run sre-ingest snapshot save data/snapshot
+      - name: Retrieval gate
+        if: steps.ready.outputs.run == 'true'
+        run: uv run sre-eval retrieval --experiment hybrid-gte-small --loop ci --gate
+
+  build:
+    runs-on: ubuntu-24.04
+    needs: [lint, test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: docker/setup-buildx-action@v3.8.0
+      - name: Image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}/core" >> "$GITHUB_OUTPUT"
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build (push on main only)
+        uses: docker/build-push-action@v6.10.0
+        with:
+          context: .
+          file: infra/docker/core.Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ steps.image.outputs.name }}:${{ github.sha }}
+            ${{ steps.image.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

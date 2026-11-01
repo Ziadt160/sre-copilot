@@ -1,0 +1,11 @@
+name: hybrid-bge-m3
+description: "Weighted RRF of dense (bge-m3) and keyword (english), equal weights."
+embedding_model: bge-m3
+legs: [dense, keyword]
+ts_config: english
+weights: {dense: 1.0, keyword: 1.0}
+k: [3, 5, 8, 10]
+candidates_per_leg: 50
+rrf_k: 60
+ef_search: 100
+iterative_scan: relaxed_order

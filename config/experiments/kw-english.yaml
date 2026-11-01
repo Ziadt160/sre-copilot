@@ -1,0 +1,11 @@
+name: kw-english
+description: "Keyword leg only, english ts_config (embedding model unused)."
+embedding_model: gte-small
+legs: [keyword]
+ts_config: english
+weights: {dense: 1.0, keyword: 1.0}
+k: [3, 5, 8, 10]
+candidates_per_leg: 50
+rrf_k: 60
+ef_search: 100
+iterative_scan: relaxed_order
