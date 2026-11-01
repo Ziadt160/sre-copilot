@@ -183,3 +183,21 @@ async def test_http_group_claim_outside_app_metadata_is_ignored(
     }
     bearer = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     assert A_PATH not in await http_paths(client, bearer)
+
+
+@pytest.mark.parametrize("app_metadata", ["team-a", ["team-a"], 42])
+async def test_http_malformed_app_metadata_is_401(
+    client: httpx.AsyncClient, corpus: Corpus, app_metadata: object
+) -> None:
+    """Found by V01: a validly signed token whose app_metadata is not an object returned 500."""
+    payload = {
+        "sub": "user-b",
+        "role": "authenticated",
+        "exp": int(time.time()) + 3600,
+        "app_metadata": app_metadata,
+    }
+    bearer = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    r = await client.get(
+        "/search", params={"q": QUERIES[0]}, headers={"Authorization": f"Bearer {bearer}"}
+    )
+    assert r.status_code == 401

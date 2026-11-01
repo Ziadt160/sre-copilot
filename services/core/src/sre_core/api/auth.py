@@ -41,6 +41,9 @@ def claims_from_authorization(authorization: str | None) -> Claims:
     sub = payload.get("sub")
     if role != "authenticated" or not isinstance(sub, str) or not sub:
         raise HTTPException(status_code=401, detail="token is not a user token")
-    raw_groups = (payload.get("app_metadata") or {}).get("groups") or []
+    app_metadata = payload.get("app_metadata") or {}
+    if not isinstance(app_metadata, dict):
+        raise HTTPException(status_code=401, detail="malformed app_metadata claim")
+    raw_groups = app_metadata.get("groups") or []
     groups = [g for g in raw_groups if isinstance(g, str)] if isinstance(raw_groups, list) else []
     return Claims(sub=sub, role="authenticated", groups=groups)
