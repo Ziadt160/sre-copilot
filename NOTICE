@@ -1,0 +1,12 @@
+SRE Copilot
+Copyright (c) 2026 Ziad Tarek. Code licensed under the MIT License (see LICENSE).
+
+Third-party content used at runtime (not redistributed in this repository):
+
+- Kubernetes Documentation, (c) The Kubernetes Authors, licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/). Source: https://github.com/kubernetes/website
+  Answers cite the original pages on kubernetes.io; chunked text is a modified form of the docs.
+
+Models:
+- gte-small (Supabase/gte-small, ONNX export of thenlper/gte-small), MIT License.
+- bge-large-en-v1.5 and bge-m3 (BAAI), MIT License. Lab experiments only.

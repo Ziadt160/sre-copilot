@@ -1,0 +1,9 @@
+# Corpus sources. `sre-ingest pin` fills `versions` with release branches and commit SHAs,
+# so the lab and CI rebuild exactly the same corpus. Owned by the ingest service.
+project: kubernetes
+repo: https://github.com/kubernetes/website
+docs_root: content/en/docs
+language: en
+license: CC-BY-4.0
+attribution: "Kubernetes Documentation, (c) The Kubernetes Authors, CC BY 4.0, https://kubernetes.io/docs/"
+versions: []

@@ -1,0 +1,22 @@
+[project]
+name = "sre-shared"
+version = "0.1.0"
+description = "Settings, data models, DB helpers, embedders and test fixtures shared by every SRE Copilot service."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "pyyaml>=6.0",
+    "psycopg[binary]>=3.2",
+    "psycopg-pool>=3.2",
+    "pgvector>=0.3.6",
+    "numpy>=2.0",
+    "onnxruntime>=1.20",
+    "tokenizers>=0.20",
+    "huggingface-hub>=0.26",
+    "httpx>=0.28",
+]
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"

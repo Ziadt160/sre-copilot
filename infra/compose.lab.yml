@@ -1,0 +1,19 @@
+# Lab services that run beside the Supabase local stack (npx supabase start).
+# Phase 1 needs only the shared test Postgres; Redis, the streaming replica, Toxiproxy,
+# Prometheus and Grafana arrive in later phases. Ollama runs natively on Windows for the GPU.
+name: sre-lab
+
+services:
+  testdb:
+    # Same image the Supabase CLI runs, so integration tests match the lab database.
+    image: ${SRE_TEST_PG_IMAGE:-public.ecr.aws/supabase/postgres:17.11.0.006}
+    environment:
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "127.0.0.1:54400:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "127.0.0.1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped

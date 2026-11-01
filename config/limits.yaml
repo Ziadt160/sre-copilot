@@ -1,0 +1,46 @@
+# Free-tier limits and model lists. Code reads these; nothing is hard-coded.
+# Limits change often: re-check each provider's limits page monthly (design doc, "Constraints").
+# Numbers below are as published in Oct 2026; the Groq console's limits page is authoritative.
+
+providers:
+  groq:
+    order: 1
+    base_url: https://api.groq.com/openai/v1
+    key_env: GROQ_API_KEY
+    allowed_for: [user_traffic, lab_jobs]
+    models:
+      openai/gpt-oss-20b:  {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
+      openai/gpt-oss-120b: {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
+  openrouter:
+    order: 2
+    base_url: https://openrouter.ai/api/v1
+    key_env: OPENROUTER_API_KEY
+    allowed_for: [user_traffic, lab_jobs]
+    account: {rpm: 20, rpd: 50}
+    models: []            # ":free" models rotate; reviewed monthly
+  cloudflare_workers_ai:
+    order: 3
+    allowed_for: [user_traffic]
+    account: {neurons_per_day: 10000}
+  nvidia:
+    order: 4
+    base_url: https://integrate.api.nvidia.com/v1
+    allowed_for: [user_traffic, lab_jobs]
+    account: {rpm: 40}
+  ollama:
+    order: lab
+    base_url: http://127.0.0.1:11434
+    allowed_for: [dev, ci, bulk_evals, local_judge, golden_synthesis]
+    models: [qwen2.5:7b, qwen2.5-coder:7b, deepseek-r1:8b]
+
+services:
+  supabase_free:      {db_mb: 500, edge_function_calls_per_month: 500000, pause_after_idle_days: 7}
+  render_free:        {ram_mb: 512, instance_hours_per_month: 750, sleep_after_idle_min: 15}
+  langsmith_developer: {base_traces_per_month: 5000, retention_days: 14}
+  upstash_free:       {mb: 250, commands_per_month: 500000}
+  healthchecks_hobbyist: {checks: 20}
+
+budgets:
+  answer_token_budget: 5000          # router + generation + grounding check, per answer
+  stop_routing_at_share_of_tpd: 0.90 # per model per day
+  golden_synthesis_max_share_of_tpd: 0.25  # cap on any hosted model used for golden generation

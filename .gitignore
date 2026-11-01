@@ -1,0 +1,33 @@
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# orchestration run directories (local working notes)
+.orchestra/
+
+# data and caches produced by ingest and evals
+data/
+.cache/
+*.parquet
+eval-artifacts/
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# claude code local state
+.claude/worktrees/
