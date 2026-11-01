@@ -13,6 +13,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from sre_core.answer import Answerer, build_answerer
+from sre_core.answer.service import ConfigError, error_event
 from sre_core.api.auth import claims_from_authorization
 from sre_core.retrieval import NoActiveCorpusError, Retriever
 from sre_shared.config import load_retrieval_defaults
@@ -50,9 +51,15 @@ def sse_frame(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
 
 
-def create_app(retriever: Retriever | None = None, answerer: Answerer | None = None) -> FastAPI:
+def create_app(
+    retriever: Retriever | None = None,
+    answerer: Answerer | None = None,
+    allow_request_config: bool = False,
+) -> FastAPI:
     """Build the app. Tests pass a `Retriever` (and optionally an `Answerer`) on their own pool;
-    production opens a pool at startup."""
+    production opens a pool at startup. `allow_request_config` lets `/answer` callers send their
+    own `AnswerConfig` (model, floor, tokens): off by default, because it would let anyone pick
+    the model and disable abstention."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -128,6 +135,8 @@ def create_app(retriever: Retriever | None = None, answerer: Answerer | None = N
     ) -> AnswerResult | StreamingResponse:
         """JSON `AnswerResult`; with `Accept: text/event-stream`, SSE events `sources`, `token`
         (repeated) and `done` (the full `AnswerResult`)."""
+        if body.config is not None and not allow_request_config:
+            raise HTTPException(status_code=422, detail="config is not accepted on this endpoint")
         try:
             if "text/event-stream" in request.headers.get("accept", ""):
                 events = ans.stream(body, claims)
@@ -135,7 +144,11 @@ def create_app(retriever: Retriever | None = None, answerer: Answerer | None = N
 
                 async def frames() -> AsyncIterator[str]:
                     yield sse_frame(first["event"], first["data"])
-                    async for ev in events:
+                    try:
+                        async for ev in events:
+                            yield sse_frame(ev["event"], ev["data"])
+                    except Exception as exc:  # the 200 is sent: end with an error event
+                        ev = error_event(exc)
                         yield sse_frame(ev["event"], ev["data"])
 
                 return StreamingResponse(
@@ -148,7 +161,7 @@ def create_app(retriever: Retriever | None = None, answerer: Answerer | None = N
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         except QuotaExceeded as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
-        except ValueError as exc:
+        except ConfigError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return app

@@ -13,10 +13,10 @@ from sre_core.answer.compress import (
     NoCompressor,
     SentenceCompressor,
     chunk_tokens,
-    merge_adjacent,
+    group_adjacent,
     split_units,
 )
-from sre_core.answer.prompts import ABSTAIN_TEXT, SYSTEM_PROMPT, build_messages
+from sre_core.answer.prompts import ABSTAIN_TEXT, SYSTEM_PROMPT, build_messages, group_sources
 from sre_core.answer.testing import StubRetriever, chunk, fake_chat
 from sre_core.retrieval import Retriever
 from sre_shared.embed.fake import FakeEmbedder
@@ -42,7 +42,7 @@ def test_sources_are_delimited_and_cannot_break_out() -> None:
     user = msgs[1]["content"]
     assert user.count("<source ") == 2
     assert user.count("</source>") == 2
-    assert user.index("Question: what is a pod?") > user.rindex("</source>")
+    assert user.index("<question>\nwhat is a pod?") > user.rindex("</source>")
     assert '<source id="1" title="Pods" version="1.31">' in user
     assert "&lt;/source>" in user and "&lt;SOURCE id" in user
 
@@ -170,13 +170,19 @@ async def test_no_compressor_respects_budget_and_truncates_first() -> None:
     assert chunk_tokens(out[0]) <= 100
 
 
-def test_merge_same_section_keeps_best_ranked_id() -> None:
+def test_group_same_section_keeps_ids_and_bodies() -> None:
     a = chunk(5, "Part two.", section="S", path="p.md")
     b = chunk(3, "Part one.", section="S", path="p.md")
     c = chunk(9, "Other.", section="T", path="p.md")
-    out = merge_adjacent([a, c, b])
-    assert [x.chunk_id for x in out] == [5, 9]
-    assert out[0].body == "Part one.\n\nPart two."
+    out = group_adjacent([a, c, b])
+    assert [x.chunk_id for x in out] == [5, 3, 9]
+    assert [x.body for x in out] == ["Part two.", "Part one.", "Other."]
+    groups = group_sources(out)
+    assert [[x.chunk_id for x in g] for g in groups] == [[5, 3], [9]]
+    user = build_messages("q", out, groups)[1]["content"]
+    assert user.count("<source ") == 2 and user.index("Part two.") < user.index("Part one.")
+    _, cites, _ = resolve_citations("a [1] b [2]", out, groups)
+    assert [x.chunk_id for x in cites] == [5, 3, 9]
 
 
 async def test_answer_with_sentence_compression() -> None:

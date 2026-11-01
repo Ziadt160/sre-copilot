@@ -440,7 +440,7 @@ async def test_rls_answer_json_and_sse(
     team_b = corpus.one("content/en/docs/internal/bravo.md@1.31")
     chat, _ = fake_chat("See [1][2][3][4][5][6][7][8][9][10].")
     ans = build_answerer(retriever, config=CFG, chat=chat, embedder=FakeEmbedder())
-    app = create_app(retriever, ans)
+    app = create_app(retriever, ans, allow_request_config=True)
     body = {
         "question": "quokka rollout runbook credentials wombat escalation pager vault",
         "config": {"model": "ollama:fake", "k": 20, "relevance_floor": floor},

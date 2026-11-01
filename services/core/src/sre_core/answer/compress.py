@@ -1,4 +1,4 @@
-"""Context compression (design doc): drop sentences unrelated to the question, merge chunks of
+"""Context compression (design doc): drop sentences unrelated to the question, group chunks of
 one page section, then fill a fixed token share in rank order.
 
 Token counts are `len(text) // 4`, the same estimate the quota guard in `sre_shared.llm` uses;
@@ -71,40 +71,33 @@ def _join(units: Sequence[_Unit]) -> str:
     return out
 
 
-def merge_adjacent(chunks: Sequence[RetrievedChunk]) -> list[RetrievedChunk]:
-    """Merge chunks of the same page version and section into one, placed at the rank of its
-    best member and keeping that member's `chunk_id`. Bodies are concatenated in chunk-id
-    (ingest) order. Returns chunks unchanged in rank order when nothing shares a section."""
-    groups: dict[tuple[str, str, tuple[str, ...]], list[RetrievedChunk]] = {}
-    for c in chunks:
-        groups.setdefault((c.source_path, c.k8s_version, tuple(c.section_path)), []).append(c)
+SectionKey = tuple[str, str, tuple[str, ...]]
+
+
+def section_key(c: RetrievedChunk) -> SectionKey:
+    return (c.source_path, c.k8s_version, tuple(c.section_path))
+
+
+def group_adjacent(chunks: Sequence[RetrievedChunk]) -> list[RetrievedChunk]:
+    """Make chunks of the same page version and section adjacent, at the rank of their best
+    member and in rank order. Chunks are not fused: each keeps its own `chunk_id` and body, so a
+    citation traces to the chunk that holds the text. The prompt renders each run of
+    same-section chunks as one source (`prompts.group_sources`)."""
     out: list[RetrievedChunk] = []
-    seen: set[tuple[str, str, tuple[str, ...]]] = set()
+    done: set[SectionKey] = set()
     for c in chunks:
-        key = (c.source_path, c.k8s_version, tuple(c.section_path))
-        if key in seen:
+        key = section_key(c)
+        if key in done:
             continue
-        seen.add(key)
-        members = groups[key]
-        if len(members) == 1:
-            out.append(c)
-            continue
-        ordered = sorted(members, key=lambda m: m.chunk_id)
-        sims = [m.dense_similarity for m in members if m.dense_similarity is not None]
-        out.append(
-            c.model_copy(
-                update={
-                    "body": "\n\n".join(m.body for m in ordered if m.body),
-                    "dense_similarity": max(sims) if sims else None,
-                }
-            )
-        )
+        done.add(key)
+        out.extend(m for m in chunks if section_key(m) == key)
     return out
 
 
 def fill_budget(chunks: Sequence[RetrievedChunk], token_budget: int) -> list[RetrievedChunk]:
     """Take chunks in rank order while they fit. A first chunk larger than the whole budget is
-    cut to it; a later chunk that does not fit is skipped (smaller ones after it may still fit)."""
+    cut to it (header first, then body); a later chunk that does not fit is skipped (smaller
+    ones after it may still fit)."""
     out: list[RetrievedChunk] = []
     used = 0
     for c in chunks:
@@ -113,8 +106,10 @@ def fill_budget(chunks: Sequence[RetrievedChunk], token_budget: int) -> list[Ret
             out.append(c)
             used += n
         elif not out:
-            room = max(token_budget - count_tokens(c.header), 1) * CHARS_PER_TOKEN
-            out.append(c.model_copy(update={"body": c.body[:room]}))
+            room = token_budget * CHARS_PER_TOKEN
+            header = c.header[:room]
+            body = c.body[: max(room - len(header), 0)]
+            out.append(c.model_copy(update={"header": header, "body": body}))
             used = token_budget
     return out
 
@@ -132,7 +127,7 @@ class NoCompressor:
 
 class SentenceCompressor:
     """Keep sentences whose embedding similarity to the question is at least `threshold`, plus
-    the best `min_per_chunk` of each chunk, in original order; merge same-section chunks; fill
+    the best `min_per_chunk` of each chunk, in original order; group same-section chunks; fill
     the budget in rank order."""
 
     name = "sentence"
@@ -167,4 +162,4 @@ class SentenceCompressor:
         self, query: str, chunks: Sequence[RetrievedChunk], token_budget: int
     ) -> list[RetrievedChunk]:
         shrunk = await asyncio.to_thread(self._compress_sync, query, list(chunks))
-        return fill_budget(merge_adjacent(shrunk), token_budget)
+        return fill_budget(group_adjacent(shrunk), token_budget)

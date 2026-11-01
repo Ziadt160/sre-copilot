@@ -8,6 +8,7 @@ shows what it found, without calling the model. Retrieved text is delimited data
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import AsyncIterator
 from typing import Any
@@ -19,11 +20,12 @@ from sre_core.answer.prompts import (
     ABSTAIN_TEXT,
     PROMPT_VERSION,
     build_messages,
+    group_sources,
 )
-from sre_core.retrieval import Retriever
+from sre_core.retrieval import NoActiveCorpusError, Retriever
 from sre_shared.config import load_answer_config, load_retrieval_defaults
 from sre_shared.embed import Embedder, get_embedder
-from sre_shared.llm import ChatClient, Message, estimate_tokens, parse_model_spec
+from sre_shared.llm import ChatClient, Message, QuotaExceeded, estimate_tokens, parse_model_spec
 from sre_shared.models import (
     ANONYMOUS,
     AnswerConfig,
@@ -37,6 +39,35 @@ from sre_shared.models import (
 )
 
 Event = dict[str, Any]
+
+
+log = logging.getLogger("sre_core.answer")
+
+
+class ConfigError(ValueError):
+    """The answer config names an unknown prompt version or model provider (a client error)."""
+
+
+def _groups(p: _Prepared) -> list[list[RetrievedChunk]] | None:
+    """With sentence compression, same-section chunks share one source number (their ids stay
+    separate and a citation of the source expands to all of them)."""
+    if p.cfg.compression != "sentence":
+        return None
+    groups = group_sources(p.context)
+    if len(groups) < len(p.context):
+        log.info("grouped %d chunks into %d sources", len(p.context), len(groups))
+    return groups
+
+
+def error_event(exc: BaseException) -> Event:
+    """An SSE `error` event with a detail that is safe to show: the message for quota and
+    corpus errors, generic text for anything else."""
+    detail = (
+        str(exc)
+        if isinstance(exc, QuotaExceeded | NoActiveCorpusError)
+        else "answer generation failed"
+    )
+    return {"event": "error", "data": {"type": type(exc).__name__, "detail": detail}}
 
 
 class _Prepared:
@@ -79,14 +110,18 @@ class Answerer:
     def _cfg(self, req: AnswerRequest) -> AnswerConfig:
         cfg = req.config or self._config or load_answer_config()
         if cfg.prompt_version != PROMPT_VERSION:
-            raise ValueError(f"unknown prompt_version {cfg.prompt_version!r}")
+            raise ConfigError(f"unknown prompt_version {cfg.prompt_version!r}")
         return cfg
 
     def _chat_for(self, cfg: AnswerConfig) -> ChatClient:
         if self._chat is not None:
             return self._chat
         if cfg.model not in self._chats:
-            self._chats[cfg.model] = ChatClient(parse_model_spec(cfg.model))
+            try:
+                spec = parse_model_spec(cfg.model)
+            except ValueError as exc:
+                raise ConfigError(str(exc)) from exc
+            self._chats[cfg.model] = ChatClient(spec)
         return self._chats[cfg.model]
 
     def _compressor(self, cfg: AnswerConfig) -> Compressor:
@@ -154,7 +189,7 @@ class Answerer:
         completion_tokens: int,
         t_gen_start: float,
     ) -> AnswerResult:
-        clean, citations, invalid = resolve_citations(text, p.context)
+        clean, citations, invalid = resolve_citations(text, p.context, _groups(p))
         clean = clean.strip()
         t_end = time.perf_counter()
         timings = {
@@ -196,7 +231,7 @@ class Answerer:
         p = await self._prepare(req, claims)
         if p.abstain:
             return self._abstained(req, p)
-        messages = build_messages(req.question, p.context)
+        messages = build_messages(req.question, p.context, _groups(p))
         t_gen = time.perf_counter()
         res = await self._chat_for(p.cfg).acomplete(
             messages, max_tokens=p.cfg.max_tokens, temperature=p.cfg.temperature
@@ -206,9 +241,10 @@ class Answerer:
         )
 
     async def stream(self, req: AnswerRequest, claims: Claims = ANONYMOUS) -> AsyncIterator[Event]:
-        """Events: `sources` {context}, `token` {text}, `done` {AnswerResult}. Errors (no active
-        corpus, quota) are raised before the first event is yielded, so a caller that reads the
-        first event can still turn them into an HTTP status."""
+        """Events: `sources` {context}, `token` {text}, `done` {AnswerResult}. Errors before the
+        first event (no active corpus, quota) are raised, so a caller that reads the first event
+        can still turn them into an HTTP status; later ones end the stream with an `error`
+        event {type, detail}."""
         p = await self._prepare(req, claims)
         if p.abstain:
             result = self._abstained(req, p)
@@ -217,21 +253,26 @@ class Answerer:
             yield {"event": "done", "data": result.model_dump(mode="json")}
             return
         chat = self._chat_for(p.cfg)
-        messages: list[Message] = build_messages(req.question, p.context)
+        messages: list[Message] = build_messages(req.question, p.context, _groups(p))
         chat.check_quota(estimate_tokens(messages, p.cfg.max_tokens))
         yield {"event": "sources", "data": {"context": _dump(p.context)}}
         t_gen = time.perf_counter()
         parts: list[str] = []
-        async for delta in chat.astream(
-            messages, max_tokens=p.cfg.max_tokens, temperature=p.cfg.temperature
-        ):
-            parts.append(delta)
-            yield {"event": "token", "data": {"text": delta}}
-        text = "".join(parts)
-        prompt_tokens = sum(len(m["content"]) for m in messages) // 4
-        result = self._finish(
-            req, p, text, chat.spec.model, prompt_tokens, count_tokens(text), t_gen
-        )
+        try:
+            async for delta in chat.astream(
+                messages, max_tokens=p.cfg.max_tokens, temperature=p.cfg.temperature
+            ):
+                parts.append(delta)
+                yield {"event": "token", "data": {"text": delta}}
+            text = "".join(parts)
+            prompt_tokens = sum(len(m["content"]) for m in messages) // 4
+            result = self._finish(
+                req, p, text, chat.spec.model, prompt_tokens, count_tokens(text), t_gen
+            )
+        except Exception as exc:  # after `sources` the HTTP status is gone: end with an event
+            log.warning("answer stream failed: %s", type(exc).__name__)
+            yield error_event(exc)
+            return
         yield {"event": "done", "data": result.model_dump(mode="json")}
 
 
