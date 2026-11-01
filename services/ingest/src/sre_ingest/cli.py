@@ -144,11 +144,15 @@ def report(
 def snapshot_export(
     corpus_version: Annotated[str, typer.Option("--corpus-version", help="id or 'active'")],
     out: Annotated[Path, typer.Option("--out")],
+    models: Annotated[
+        str | None, typer.Option(help="Comma-separated models to keep (default: all held)")
+    ] = None,
     dsn: DsnOpt = None,
 ) -> None:
+    keep = [m.strip() for m in models.split(",") if m.strip()] if models else None
     with store.open_conn(dsn) as conn:
         cv = store.resolve_version(conn, corpus_version)
-        counts = snapshot_mod.export_snapshot(conn, cv, out)
+        counts = snapshot_mod.export_snapshot(conn, cv, out, keep)
     typer.echo(f"exported corpus_version={cv} {counts} -> {out}")
 
 

@@ -10,7 +10,7 @@ under `sre_snapshot`.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -71,7 +71,11 @@ def _table(rows: list[dict[str, Any]]) -> pa.Table:
     return pa.table(cols, schema=SCHEMA)
 
 
-def export_snapshot(conn: store.Conn, cv: int, out: Path) -> dict[str, int]:
+def export_snapshot(
+    conn: store.Conn, cv: int, out: Path, models: Sequence[str] | None = None
+) -> dict[str, int]:
+    """Write the corpus version to `out`. `models` limits the vector columns to those models
+    (the others are written as nulls); by default every model the version holds is kept."""
     meta = conn.execute(
         "select label, sources, chunker_version, embedding_models from public.corpus_versions"
         " where id=%s",
@@ -79,12 +83,18 @@ def export_snapshot(conn: store.Conn, cv: int, out: Path) -> dict[str, int]:
     ).fetchone()
     if meta is None:
         raise LookupError(f"corpus version {cv} does not exist")
+    held = list(meta["embedding_models"])
+    keep = held if models is None else list(models)
+    missing = [m for m in keep if m not in held]
+    if missing:
+        raise ValueError(f"corpus version {cv} has no embeddings for {missing}; it holds {held}")
+    kept_columns = {SPECS[m].column for m in keep}  # type: ignore[index]
     info = {
         "format": FORMAT,
         "label": meta["label"],
         "sources": meta["sources"],
         "chunker_version": meta["chunker_version"],
-        "embedding_models": list(meta["embedding_models"]),
+        "embedding_models": keep,
     }
     out.parent.mkdir(parents=True, exist_ok=True)
     schema = SCHEMA.with_metadata({"sre_snapshot": json.dumps(info)})
@@ -109,7 +119,12 @@ def export_snapshot(conn: store.Conn, cv: int, out: Path) -> dict[str, int]:
                 batch = [
                     {
                         "kind": "chunk",
-                        **{k: (_vec(v) if k in VECTOR_COLUMNS else v) for k, v in r.items()},
+                        **{
+                            k: (_vec(v) if k in kept_columns else None)
+                            if k in VECTOR_COLUMNS
+                            else v
+                            for k, v in r.items()
+                        },
                     }
                     for r in rows
                 ]

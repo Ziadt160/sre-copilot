@@ -207,3 +207,45 @@ def test_snapshot_round_trip_into_fresh_database(
     assert got_docs == src_docs
     assert status == {"status": "active", "embedding_models": ["gte-small"]}
     assert np.isfinite([float(x) for x in got[0]["v"].strip("[]").split(",")]).all()
+
+
+def test_snapshot_export_keeps_only_selected_models(
+    dsn: str, cfg: CorpusConfig, tmp_path: Path
+) -> None:
+    """CI's snapshot needs gte-small only; the lab corpus also holds the two BGE columns."""
+    import json
+
+    import pyarrow.parquet as pq
+
+    cv = ingest(cfg, dsn, tmp_path).corpus_version_id
+    with store.open_conn(dsn) as conn:
+        conn.execute(
+            "update public.chunks set emb_bge_m3 = array_fill(0.1, array[1024])::halfvec"
+            " where corpus_version_id = %s",
+            [cv],
+        )
+        conn.execute(
+            "update public.corpus_versions set embedding_models = %s where id = %s",
+            [["gte-small", "bge-m3"], cv],
+        )
+        conn.commit()
+        out = tmp_path / "gte.parquet"
+        snapshot.export_snapshot(conn, cv, out, ["gte-small"])
+        with pytest.raises(ValueError, match="no embeddings for"):
+            snapshot.export_snapshot(conn, cv, tmp_path / "x.parquet", ["bge-large"])
+    table = pq.read_table(out)
+    kinds = table.column("kind").to_pylist()
+    m3 = [
+        v
+        for k, v in zip(kinds, table.column("emb_bge_m3").to_pylist(), strict=True)
+        if k == "chunk"
+    ]
+    gte = [
+        v
+        for k, v in zip(kinds, table.column("emb_gte_small").to_pylist(), strict=True)
+        if k == "chunk"
+    ]
+    assert m3 and all(v is None for v in m3)
+    assert all(v is not None and len(v) == 384 for v in gte)
+    info = json.loads(pq.read_schema(out).metadata[b"sre_snapshot"])
+    assert info["embedding_models"] == ["gte-small"]

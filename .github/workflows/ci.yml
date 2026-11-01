@@ -164,15 +164,38 @@ jobs:
         with:
           path: data/snapshot/corpus.parquet
           key: corpus-${{ hashFiles('config/corpus.yaml') }}-${{ hashFiles('services/ingest/src/**') }}-gte-small
-      - name: Load corpus snapshot
-        if: steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit == 'true'
-        run: uv run sre-ingest snapshot load --in data/snapshot/corpus.parquet --activate
-      - name: Build corpus (cache miss)
+      # Cache miss: download the published snapshot (a release named after corpus.yaml and the
+      # chunker version, checked against its sha256) instead of re-embedding 47k chunks on CPU
+      # for hours. A parser change must bump CHUNKER_VERSION, which also renames the release.
+      - name: Download published snapshot (cache miss)
+        id: download
         if: steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          chunker=$(uv run python -c "from sre_ingest.chunker import CHUNKER_VERSION; print(CHUNKER_VERSION)")
+          tag="corpus-$(sha256sum config/corpus.yaml | cut -c1-12)-chunker${chunker}-gte-small"
+          mkdir -p data/snapshot
+          if gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir data/snapshot --pattern 'corpus.parquet*'; then
+            (cd data/snapshot && sha256sum -c corpus.parquet.sha256)
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=No published snapshot::release $tag not found; building the corpus"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Load corpus snapshot
+        if: >-
+          steps.ready.outputs.run == 'true' && (steps.snapshot.outputs.cache-hit == 'true'
+          || steps.download.outputs.found == 'true')
+        run: uv run sre-ingest snapshot load --in data/snapshot/corpus.parquet --activate
+      - name: Build corpus (no cache, no published snapshot)
+        if: >-
+          steps.ready.outputs.run == 'true' && steps.snapshot.outputs.cache-hit != 'true'
+          && steps.download.outputs.found != 'true'
         run: |
           uv run sre-ingest run --models gte-small --activate
           mkdir -p data/snapshot
-          uv run sre-ingest snapshot export --corpus-version active --out data/snapshot/corpus.parquet
+          uv run sre-ingest snapshot export --corpus-version active --models gte-small --out data/snapshot/corpus.parquet
       - name: Retrieval gate
         if: steps.ready.outputs.run == 'true'
         # Exact dense search keeps the metrics deterministic (HNSW builds are randomised);

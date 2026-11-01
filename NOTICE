@@ -1,11 +1,17 @@
 SRE Copilot
 Copyright (c) 2026 Ziad Tarek. Code licensed under the MIT License (see LICENSE).
 
-Third-party content used at runtime (not redistributed in this repository):
+Third-party content:
 
 - Kubernetes Documentation, (c) The Kubernetes Authors, licensed under CC BY 4.0
   (https://creativecommons.org/licenses/by/4.0/). Source: https://github.com/kubernetes/website
-  Answers cite the original pages on kubernetes.io; chunked text is a modified form of the docs.
+  (content/en/docs at the commits pinned in config/corpus.yaml).
+  Redistributed in modified form in two places:
+    - evals/golden/: gold passages quote spans of the parsed pages;
+    - the GitHub release assets named corpus-*-gte-small: the parsed text of every page,
+      split into chunks, with gte-small embeddings (for the CI retrieval gate).
+  Changes made: Hugo front matter and shortcodes rendered as text or removed, pages split
+  into chunks with a context header. Answers cite the original pages on kubernetes.io.
 
 Models:
 - gte-small (Supabase/gte-small, ONNX export of thenlper/gte-small), MIT License.
