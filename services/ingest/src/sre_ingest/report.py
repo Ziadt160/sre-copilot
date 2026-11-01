@@ -84,5 +84,5 @@ def write_report(report: dict[str, Any], data_dir: Path | None = None) -> Path:
     out_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     path = out_dir / f"ingest-cv{report['corpus_version_id']}-{stamp}.json"
-    path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8", newline="\n")
     return path

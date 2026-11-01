@@ -97,7 +97,8 @@ def make_baseline(
 
 def write_baseline(baseline: dict[str, Any], path: Path = DEFAULT_BASELINE) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(baseline, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    text = json.dumps(baseline, indent=2, sort_keys=True) + "\n"
+    path.write_text(text, encoding="utf-8", newline="\n")  # same bytes on every OS
 
 
 def gate_tolerance(summary: dict[str, Any]) -> float:

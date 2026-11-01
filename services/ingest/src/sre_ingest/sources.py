@@ -74,7 +74,7 @@ def resolve_sources(cfg: CorpusConfig, hugo_toml: str, count: int) -> list[Corpu
 
 def write_corpus_config(cfg: CorpusConfig, path: Path) -> None:
     body = yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=False, allow_unicode=True)
-    path.write_text(CORPUS_HEADER + body, encoding="utf-8")
+    path.write_text(CORPUS_HEADER + body, encoding="utf-8", newline="\n")
 
 
 def pin(count: int, config_dir: Path | None = None) -> CorpusConfig:

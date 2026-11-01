@@ -1,1 +1,20 @@
-{}
+{
+  "ann_recall_floor": {
+    "ef_search": 100,
+    "min": 0.95
+  },
+  "experiment": "dense-gte-small",
+  "golden_version": "v1-cb87f3bc8b9a4407",
+  "metrics": {
+    "mrr@10": 0.644117,
+    "recall@5": 0.855072
+  },
+  "schema_version": 2,
+  "search": "exact",
+  "source": {
+    "config_hash": "db7af39b069b3f01",
+    "corpus_version_id": 1,
+    "git_sha": "bc3725da27b2",
+    "run_id": 137
+  }
+}

@@ -167,7 +167,11 @@ jobs:
           uv run sre-ingest snapshot export --corpus-version active --out data/snapshot/corpus.parquet
       - name: Retrieval gate
         if: steps.ready.outputs.run == 'true'
-        run: uv run sre-eval retrieval --experiment hybrid-gte-small --loop ci --gate
+        # Exact dense search keeps the metrics deterministic (HNSW builds are randomised);
+        # the ANN recall floor in the baseline checks the index itself (decision 31).
+        run: >-
+          uv run sre-eval retrieval --experiment dense-gte-small --loop ci
+          --exact --ann-recall --ann-sample 69 --gate
 
   build:
     runs-on: ubuntu-24.04

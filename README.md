@@ -17,12 +17,12 @@ up as negative results.
 |---|---|---|---|---|---|---|---|---|
 | `dense-bge-large` | bge-large | 0.870 | 0.670 | 0.722 | 58 | 69 | v1-cb87f3bc | `82e4565f5b06` |
 | `dense-bge-m3` | bge-m3 | 0.870 | 0.675 | 0.737 | 88 | 69 | v1-cb87f3bc | `82e4565f5b06` |
-| `dense-gte-small` | gte-small | 0.855 | 0.644 | 0.705 | 32 | 69 | v1-cb87f3bc | `82e4565f5b06` |
+| `dense-gte-small` | gte-small | 0.855 | 0.644 | 0.705 | 47 | 69 | v1-cb87f3bc | `bc3725da27b2` |
 | `hybrid-bge-large` | bge-large | 0.652 | 0.528 | 0.586 | 320 | 69 | v1-cb87f3bc | `82e4565f5b06` |
 | `hybrid-bge-m3` | bge-m3 | 0.681 | 0.577 | 0.625 | 368 | 69 | v1-cb87f3bc | `82e4565f5b06` |
-| `hybrid-gte-small` | gte-small | 0.638 | 0.491 | 0.551 | 281 | 69 | v1-cb87f3bc | `82e4565f5b06` |
-| `hybrid-gte-small-wk0p5` | gte-small | 0.667 | 0.544 | 0.599 | 294 | 69 | v1-cb87f3bc | `82e4565f5b06` |
-| `hybrid-gte-small-wk2` | gte-small | 0.623 | 0.481 | 0.520 | 276 | 69 | v1-cb87f3bc | `82e4565f5b06` |
+| `hybrid-gte-small` | gte-small | 0.638 | 0.491 | 0.551 | 313 | 69 | v1-cb87f3bc | `bc3725da27b2` |
+| `hybrid-gte-small-wk0p5` | gte-small | 0.667 | 0.544 | 0.599 | 294 | 69 | v1-cb87f3bc | `bc3725da27b2` |
+| `hybrid-gte-small-wk2` | gte-small | 0.623 | 0.484 | 0.522 | 317 | 69 | v1-cb87f3bc | `bc3725da27b2` |
 | `kw-english` | - | 0.348 | 0.249 | 0.277 | 261 | 69 | v1-cb87f3bc | `82e4565f5b06` |
 | `kw-english-all` | - | 0.116 | 0.121 | 0.129 | 84 | 69 | v1-cb87f3bc | `82e4565f5b06` |
 | `kw-simple` | - | 0.203 | 0.158 | 0.176 | 495 | 69 | v1-cb87f3bc | `82e4565f5b06` |
@@ -56,9 +56,9 @@ What the numbers say (paired bootstrap, 95% confidence intervals, n = 69):
   (`websearch_to_tsquery`) returned nothing for 77% of questions. Any-term matching beats it
   by recall@5 +0.232 [+0.101, +0.362]. The `english` config beats `simple` by +0.145
   [+0.058, +0.232].
-- **HNSW recall is high enough at the default `ef_search` of 100.** Against an exact scan,
-  the index finds 96% of the true top 10 for gte-small (0.92 at 40, no gain at 200), 98% for
-  bge-m3 and 93% for bge-large.
+- **HNSW recall is high at `ef_search` 100.** Against an exact scan, the gte-small index
+  (`m` 16, `ef_construction` 128 since the sweeps below) finds 98.4% of the true top 10 over
+  all 69 questions. bge-m3 finds 98% and bge-large 93% at the original `ef_construction` 64.
 
 Tuning sweeps (`sre-eval sweep` and `sre-eval hnsw`; every point is in
 [`docs/results.md`](docs/results.md#sweeps), and each is also scored on two fixed halves of
@@ -84,9 +84,24 @@ it is):
   - p50 latency stays at 19–21 ms across the grid. Build time grows from 10 s to 53 s
     (single-threaded), and index size from 54.5 MB to 64 MB at `m` 32.
 - **HNSW builds are randomised.** Five rebuilds per setting: `m` 16 / `ef_construction` 64
-  (the current index) gives ANN recall 0.974–0.991, and `ef_construction` 128 gives
+  (the original index) gives ANN recall 0.974–0.991, and `ef_construction` 128 gives
   0.983–0.996 at the same size. A single build can still lose one question (seen in one of
-  seven default builds), which is more than the CI gate's 0.01 tolerance.
+  seven original-setting builds).
+
+What changed as a result:
+
+- **Dense-only is the default retrieval mode** (`mode: dense` in `config/retrieval.yaml`,
+  decision 29). Hybrid stays available as `mode=hybrid`. It comes back as the default only if
+  an experiment beats dense on both halves of the golden set; query routing and IDF-weighted
+  keyword scoring are next.
+- **gte-small's index is `m` 16, `ef_construction` 128** (migration
+  `20261101000300`, decision 30), with `ef_search` kept at 100.
+- **The CI gate is deterministic** (decision 31).
+  - It runs `dense-gte-small` with the dense leg as an exact scan, so HNSW build noise
+    cannot fail it.
+  - It checks the index separately: ANN recall@10 at `ef_search` 100 must be at least 0.95
+    (0.984 at baseline).
+  - It fails on a loss of more than one question (tolerance 1/69).
 
 Limits:
 - 69 questions resolve differences of about ±0.1 recall, not finer. Questions were generated
