@@ -119,8 +119,11 @@ def upsert_chunks(conn: Conn, cv: int, document_id: int, chunks: Sequence[ChunkR
     return inserted
 
 
-def pending_embeddings(conn: Conn, cv: int, model: EmbeddingModelName) -> list[tuple[int, str]]:
-    """(chunk id, embedding_text) of chunks with no vector for `model` yet."""
+def pending_embeddings(
+    conn: Conn, cv: int, model: EmbeddingModelName, header_in_embedding: bool = True
+) -> list[tuple[int, str]]:
+    """(chunk id, embedding_text) of chunks with no vector for `model` yet. The text is
+    header + blank line + body, or the body alone when `header_in_embedding` is false."""
     col = sql.Identifier(SPECS[model].column)
     rows = conn.execute(
         sql.SQL(
@@ -129,7 +132,9 @@ def pending_embeddings(conn: Conn, cv: int, model: EmbeddingModelName) -> list[t
         ).format(col),
         [cv],
     ).fetchall()
-    return [(int(r["id"]), f"{r['header']}\n\n{r['body']}") for r in rows]
+    if header_in_embedding:
+        return [(int(r["id"]), f"{r['header']}\n\n{r['body']}") for r in rows]
+    return [(int(r["id"]), str(r["body"])) for r in rows]
 
 
 def cache_lookup(

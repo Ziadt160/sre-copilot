@@ -37,12 +37,13 @@ def embed_pending(
     *,
     batch_size: int = 32,
     commit_every: int = 512,
+    header_in_embedding: bool = True,
 ) -> EmbedStats:
     import time
 
     t0 = time.perf_counter()
     stats = EmbedStats(model=model, revision=embedder.revision)
-    pending = store.pending_embeddings(conn, cv, model)
+    pending = store.pending_embeddings(conn, cv, model, header_in_embedding)
     truncated_before = int(getattr(embedder, "truncated_total", 0))
     for lo in range(0, len(pending), commit_every):
         part = pending[lo : lo + commit_every]

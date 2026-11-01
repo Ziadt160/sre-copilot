@@ -1,0 +1,6 @@
+# Embed the body only; the header is still stored and still feeds the keyword leg.
+name: nohdr
+version: "1-nohdr"
+max_tokens: 510
+overlap_tokens: 0
+header_in_embedding: false

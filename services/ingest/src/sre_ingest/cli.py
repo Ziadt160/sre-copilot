@@ -11,6 +11,7 @@ import typer
 from sre_ingest import report as report_mod
 from sre_ingest import snapshot as snapshot_mod
 from sre_ingest import sources, store
+from sre_ingest.chunking_config import load_chunking
 from sre_shared.config import load_corpus_config
 from sre_shared.models import EmbeddingModelName
 
@@ -69,6 +70,9 @@ def run(
     ] = "gte-small",
     limit_docs: Annotated[int | None, typer.Option(help="Per version, evenly sampled")] = None,
     activate: Annotated[bool, typer.Option("--activate")] = False,
+    chunking: Annotated[
+        str, typer.Option(help="config/chunking/<name>.yaml; a variant is left 'ready'")
+    ] = "default",
     no_fetch: Annotated[bool, typer.Option("--no-fetch", help="Use existing checkouts")] = False,
     dsn: DsnOpt = None,
 ) -> None:
@@ -76,6 +80,7 @@ def run(
     from sre_ingest.pipeline import run_ingest
 
     cfg = load_corpus_config()
+    chunk_cfg = load_chunking(chunking)
     res = run_ingest(
         cfg,
         dsn=dsn,
@@ -83,6 +88,7 @@ def run(
         models=_models(models),
         limit_docs=limit_docs,
         activate=activate,
+        chunking=chunk_cfg,
         do_fetch=not no_fetch,
         log=typer.echo,
     )
@@ -109,8 +115,12 @@ def embed(
     embedders, _ = load_embedders(_models(models), typer.echo)
     with store.open_conn(dsn) as conn:
         cv = store.resolve_version(conn, corpus_version)
+        # The version remembers how its chunks are embedded (the run's stats hold the config).
+        chunking = store.version_stats(conn, cv).get("chunking") or {}
+        header = bool(chunking.get("header_in_embedding", True))
         for name, emb in embedders.items():
-            typer.echo(json.dumps(embed_pending(conn, cv, name, emb).as_dict()))
+            stats = embed_pending(conn, cv, name, emb, header_in_embedding=header)
+            typer.echo(json.dumps(stats.as_dict()))
 
 
 @app.command()

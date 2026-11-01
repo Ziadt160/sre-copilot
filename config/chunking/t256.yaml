@@ -1,0 +1,6 @@
+# Smaller chunks: 256 gte-small tokens, header included.
+name: t256
+version: "1-t256"
+max_tokens: 256
+overlap_tokens: 0
+header_in_embedding: true
