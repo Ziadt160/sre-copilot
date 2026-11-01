@@ -38,3 +38,21 @@ def test_iterscan_off_config() -> None:
     assert req.candidates_per_leg == 50
     assert req.use_dense and not req.use_keyword
     assert cfg.k == [3, 5, 8, 10]
+
+
+@pytest.mark.parametrize("variant", ["t256", "o64", "nohdr"])
+def test_chunking_configs_query_their_variant_with_and_without_the_reranker(variant: str) -> None:
+    exps = load_experiments()
+    dense, reranked = (
+        exps[f"dense-gte-small-chunk-{variant}"],
+        exps[f"dense-gte-small-rerank20-chunk-{variant}"],
+    )
+    label = f"k8s-1.37+1.36+1.35-chunker1-{variant}"
+    assert dense.corpus_version == label and reranked.corpus_version == label
+    assert dense.rerank is None
+    assert reranked.request_for("q", FILTERS).rerank_candidates == 20
+    # Apart from the reranker, the pair is the same experiment as its cv1 baselines.
+    base, base_rr = exps["dense-gte-small"], exps["dense-gte-small-rerank20"]
+    skip = {"name", "description", "corpus_version"}
+    assert dense.model_dump(exclude=skip) == base.model_dump(exclude=skip)
+    assert reranked.model_dump(exclude=skip) == base_rr.model_dump(exclude=skip)
