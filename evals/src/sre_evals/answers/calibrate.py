@@ -90,9 +90,12 @@ def plan_tokens(items: Sequence[LabelItem], judge: Judge | None = None) -> int:
         for k in ("faithfulness_calls", "reply_tokens")
         if judge is not None and hasattr(judge, k)
     }
+    cached = getattr(judge, "cached", None)  # a CachedJudge plans only what it lacks
     return sum(
         estimate_judge_tokens(i.answer, [p.text for p in i.passages], relevancy=False, **kw)
         for i in items
+        if cached is None
+        or not cached("faithfulness", i.question, i.answer, [p.text for p in i.passages])
     )
 
 

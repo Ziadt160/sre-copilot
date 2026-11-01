@@ -18,6 +18,7 @@ from sre_evals.answers.calibrate import (
     store_calibration,
 )
 from sre_evals.answers.judge import Judge, build_judge, check_judge_budget
+from sre_evals.answers.judge_cache import CachedJudge
 from sre_evals.answers.label import (
     LabelSession,
     labellable,
@@ -285,7 +286,8 @@ def calibrate_cmd(
     handles = []
     for spec in specs:
         judge_obj, client = _judge(spec)
-        handles.append(JudgeHandle(spec, judge_obj, client))
+        # Cached across runs: a hosted judge's quota is spent once per answer (judge_cache).
+        handles.append(JudgeHandle(spec, CachedJudge(judge_obj), client))
 
     async def go() -> None:
         conn = await connect(database_url or get_settings().database_url, autocommit=True)
