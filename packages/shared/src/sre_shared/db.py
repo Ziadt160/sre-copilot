@@ -92,7 +92,13 @@ def create_pool(
         dsn or settings.database_url,
         min_size=min_size or settings.db_pool_min,
         max_size=max_size or settings.db_pool_max,
-        kwargs={"options": SEARCH_PATH_OPTION, "row_factory": dict_row},
+        # The pool retries failed connects itself; the timeout keeps a swallowed one from
+        # hanging a worker (seen with the lab's Docker port forward).
+        kwargs={
+            "options": SEARCH_PATH_OPTION,
+            "row_factory": dict_row,
+            "connect_timeout": CONNECT_TIMEOUT_S,
+        },
         configure=_configure,
         open=False,
     )

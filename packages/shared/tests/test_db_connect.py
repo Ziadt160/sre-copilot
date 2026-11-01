@@ -74,3 +74,8 @@ async def test_connect_does_not_retry_a_server_rejection(monkeypatch: pytest.Mon
     with pytest.raises(psycopg.OperationalError):
         await db.connect("postgresql://x@127.0.0.1:1/nope")
     assert len(fake.calls) == 1
+
+
+def test_pool_connections_have_a_connect_timeout() -> None:
+    pool = db.create_pool("postgresql://x@127.0.0.1:1/db", min_size=1, max_size=1)
+    assert pool.kwargs["connect_timeout"] == db.CONNECT_TIMEOUT_S
