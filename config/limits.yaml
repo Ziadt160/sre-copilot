@@ -11,6 +11,8 @@ providers:
     models:
       openai/gpt-oss-20b:  {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
       openai/gpt-oss-120b: {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
+      # Judge candidate: another model family than the gpt-oss generator (no self-preference).
+      qwen/qwen3.8-27b:    {rpm: 30, rpd: 1000, tpm: 8000, tpd: 200000}
   openrouter:
     order: 2
     base_url: https://openrouter.ai/api/v1
