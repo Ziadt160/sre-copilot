@@ -124,3 +124,12 @@ def test_hosted_model_without_a_daily_limit_is_refused() -> None:
 
 def test_model_spec_repr_hides_the_key() -> None:
     assert "secret-key" not in repr(ModelSpec("groq", "m", "https://x/v1", "secret-key"))
+
+
+def test_local_models_get_a_longer_timeout() -> None:
+    from sre_shared.llm import DEFAULT_TIMEOUT_S, LOCAL_TIMEOUT_S
+
+    hosted = ChatClient(GROQ, limits=LIMITS, ledger=MemoryLedger())
+    local = ChatClient(OLLAMA, limits=LIMITS, ledger=MemoryLedger())
+    assert hosted._client.timeout == DEFAULT_TIMEOUT_S
+    assert local._client.timeout == LOCAL_TIMEOUT_S > DEFAULT_TIMEOUT_S

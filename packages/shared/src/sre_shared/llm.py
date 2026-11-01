@@ -26,6 +26,9 @@ from sre_shared.config import Limits, load_limits
 from sre_shared.settings import Settings, get_settings
 
 DEFAULT_TIMEOUT_S = 60.0
+# A local model shares the lab machine (GPU memory, CPU offload under load): a 7B answer took
+# over 60 s while an ingest held the CPU, so local calls get longer before timing out.
+LOCAL_TIMEOUT_S = 300.0
 DEFAULT_RETRIES = 3
 CHARS_PER_TOKEN = 4  # estimate for the quota guard; actual usage is recorded after the call
 
@@ -157,7 +160,7 @@ class ChatClient:
         self,
         spec: ModelSpec,
         *,
-        timeout: float = DEFAULT_TIMEOUT_S,
+        timeout: float | None = None,
         max_retries: int = DEFAULT_RETRIES,
         ledger: TokenLedger | None = None,
         limits: Limits | None = None,
@@ -181,6 +184,8 @@ class ChatClient:
         )
         self.ledger: TokenLedger = ledger or (FileLedger() if spec.hosted else MemoryLedger())
         key = spec.api_key or "none"
+        if timeout is None:
+            timeout = DEFAULT_TIMEOUT_S if spec.hosted else LOCAL_TIMEOUT_S
         # Duck-typed on purpose: tests inject fakes with the `chat.completions.create` surface,
         # and messages are plain role/content dicts.
         self._client: Any = client or OpenAI(
