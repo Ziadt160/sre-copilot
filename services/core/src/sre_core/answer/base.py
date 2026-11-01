@@ -5,7 +5,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Protocol
 
-from sre_shared.models import RetrievedChunk
+from sre_shared.models import ANONYMOUS, AnswerRequest, AnswerResult, Claims, RetrievedChunk
+
+
+class AnswererLike(Protocol):
+    """What callers (the API, the answer eval runner) need from the answer path. The concrete
+    answerer comes from `sre_core.answer.build_answerer(...)`."""
+
+    async def answer(self, req: AnswerRequest, claims: Claims = ANONYMOUS) -> AnswerResult: ...
 
 
 class Compressor(Protocol):
