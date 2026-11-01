@@ -19,6 +19,7 @@ One `GoldenItem` (see `sre_shared.models`) per JSON line:
 | `id` | stable, e.g. `fac-0001` (factual), `exs-0001` (exact string) |
 | `stratum` | Phase 1: `factual` (about 40 kept) and `exact_string` (about 30 kept) |
 | `question`, `expected_answer` | the query and a reference answer |
+| `filters` | retrieval filters for the question; synthesized items are scoped to their gold passage's `k8s_version` (pages are near-identical across versions) |
 | `gold_passages` | list of `{source_path, k8s_version, quote}`; `quote` is a verbatim span of `documents.parsed_text` for that version (never a chunk id, so results survive re-chunking) |
 | `origin` | `synthetic`, `rewritten` (question changed by hand), `hand` |
 | `status` | `candidate`, `accepted`, `rejected` |
@@ -45,8 +46,11 @@ sre-golden validate --in evals/golden/v1/items.jsonl
 sre-golden mirror --in evals/golden/v1/items.jsonl --dataset sre-copilot-golden-v1
 ```
 
-- `pick` is deterministic for a seed. Factual: concept/task chunks spread across documents.
-  Exact string: chunks containing an error name, a multi-word CLI flag or a field path.
+- `pick` is deterministic for a seed and uses a page once across versions; `contribute/`
+  pages are skipped. Factual: concept/task chunks spread across pages. Exact string: chunks
+  containing an error name, a multi-word CLI flag or a field path that is rare in its version
+  (on at most 3 pages, 10 for error names, so kubectl's global flags repeated on ~120
+  generated pages are out), with the three kinds taking turns.
 - `synthesize` uses DeepEval's Synthesizer with one chunk per context, so the gold passage is
   the chunk body (trim it in review). `--quality-threshold` sets the critic score below which a
   candidate is dropped (the count per stratum is printed); `--evolutions N` (default 0) adds
