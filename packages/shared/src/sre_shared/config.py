@@ -148,3 +148,160 @@ def load_corpus_config(config_dir: Path | None = None) -> CorpusConfig:
 
 def load_answer_config(config_dir: Path | None = None) -> AnswerConfig:
     return AnswerConfig.model_validate(_load_yaml("answer.yaml", config_dir))
+
+
+# --- agent.yaml (Phase 3) -----------------------------------------------------------
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class AgentLimits(_Strict):
+    llm_decisions_per_turn: int = Field(ge=1)
+    tool_calls_per_turn: int = Field(ge=0)
+    recursion_limit: int = Field(ge=10)
+    answer_token_budget: int = Field(ge=100)
+
+
+class ApprovalSettings(_Strict):
+    ttl_minutes: int = Field(ge=1, le=120)
+    sweep_interval_s: int = Field(ge=5)
+
+
+class ComplexSettings(_Strict):
+    max_subquestions: int = Field(ge=2, le=5)
+
+
+class MemorySettings(_Strict):
+    recent_turns: int = Field(ge=1)
+    summary_max_tokens: int = Field(ge=50)
+
+
+class AgentModels(_Strict):
+    rewrite: str
+    router: str
+    answer: str
+    synthesize: str
+    grounding: str
+    summary: str
+    lab: str
+
+
+class FallbackSettings(_Strict):
+    providers: list[str]
+    extractive_last: bool = True
+
+
+class CacheSettings(_Strict):
+    exact_ttl_s: int = Field(ge=0)
+    semantic_ttl_s: int = Field(ge=0)
+    semantic_min_similarity: float = Field(gt=0.0, le=1.0)
+
+
+class BudgetSettings(_Strict):
+    user_daily_tokens: int = Field(ge=0)
+
+
+class McpClientSettings(_Strict):
+    token_ttl_s: int = Field(ge=10, le=300)
+    poll_interval_s: float = Field(gt=0)
+    operation_timeout_s: int = Field(ge=30)
+
+
+class AgentConfig(_Strict):
+    limits: AgentLimits
+    approval: ApprovalSettings
+    confidence_floor: float = Field(ge=0.0, le=1.0)
+    complex: ComplexSettings
+    memory: MemorySettings
+    models: AgentModels
+    fallback: FallbackSettings
+    cache: CacheSettings
+    budgets: BudgetSettings
+    mcp: McpClientSettings
+
+
+def load_agent_config(config_dir: Path | None = None) -> AgentConfig:
+    return AgentConfig.model_validate(_load_yaml("agent.yaml", config_dir))
+
+
+# --- mcp_ops.yaml (Phase 3) ---------------------------------------------------------
+
+
+class NamespaceSettings(_Strict):
+    allowed: list[str]
+    protected: list[str] = Field(default_factory=list)
+
+
+class SimulatorSettings(_Strict):
+    scenario: str
+    seed: int
+
+
+class McpOpsConfig(_Strict):
+    namespaces: NamespaceSettings
+    backend: Literal["simulator", "kind"]
+    simulator: SimulatorSettings
+    logs: dict[str, int]
+    tasks: dict[str, str | int]
+    rotations: list[str]
+
+    def policy(self) -> Any:
+        """The shared approval policy (sre_shared.contracts.ops.NamespacePolicy)."""
+        from sre_shared.contracts.ops import NamespacePolicy
+
+        return NamespacePolicy(
+            allowed=frozenset(self.namespaces.allowed),
+            protected=frozenset(self.namespaces.protected),
+        )
+
+
+def load_mcp_ops_config(config_dir: Path | None = None) -> McpOpsConfig:
+    cfg = McpOpsConfig.model_validate(_load_yaml("mcp_ops.yaml", config_dir))
+    stray = set(cfg.namespaces.protected) - set(cfg.namespaces.allowed)
+    if stray:
+        raise ValueError(f"protected namespaces not on the allow-list: {sorted(stray)}")
+    return cfg
+
+
+# --- simulator/scenarios.yaml (Phase 3) -----------------------------------------------
+
+
+class SimDeployment(_Strict):
+    replicas: int = Field(ge=0)
+    revisions: dict[int, str]
+    current_revision: int
+    failure: str | None = None
+
+
+class SimFailure(_Strict):
+    pod_status: str
+    restarts: int = 0
+    log: str = ""
+    event: str = ""
+    condition: str | None = None
+    after_s: int | None = None
+    fixed_by: Literal["restart_deployment", "rollback_deployment"]
+    good_revisions: list[int] = Field(default_factory=list)
+
+
+class SimScenario(_Strict):
+    namespaces: dict[str, dict[str, SimDeployment]]
+    failures: dict[str, SimFailure]
+
+
+class SimScenarios(_Strict):
+    scenarios: dict[str, SimScenario]
+
+
+def load_simulator_scenarios(config_dir: Path | None = None) -> SimScenarios:
+    data = SimScenarios.model_validate(_load_yaml("simulator/scenarios.yaml", config_dir))
+    for name, sc in data.scenarios.items():
+        for ns, deps in sc.namespaces.items():
+            for dep, d in deps.items():
+                if d.current_revision not in d.revisions:
+                    raise ValueError(f"{name}/{ns}/{dep}: current_revision not in revisions")
+                if d.failure is not None and d.failure not in sc.failures:
+                    raise ValueError(f"{name}/{ns}/{dep}: unknown failure {d.failure!r}")
+    return data

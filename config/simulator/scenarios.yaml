@@ -1,0 +1,66 @@
+# Simulator scenarios (Phase 3). The simulator backend of mcp-ops (T11) builds its cluster state
+# from a scenario; the agent task set (T15) states its expected end states against the same file.
+# Read by sre_shared.config.load_simulator_scenarios.
+#
+# A failure stays until an action in `fixed_by` succeeds on its deployment (a rollout to a
+# revision listed in `good_revisions`, or a restart for transient faults). Scaling never fixes a
+# crash; it only changes replica counts.
+
+scenarios:
+  default:
+    namespaces:
+      shop:
+        checkout:
+          replicas: 3
+          revisions: {1: "shop/checkout:1.3.0", 2: "shop/checkout:1.4.1", 3: "shop/checkout:1.4.2"}
+          current_revision: 3
+          failure: crashloop
+        web:
+          replicas: 2
+          revisions: {1: "shop/web:1.9.0", 2: "shop/web:2.0.1"}
+          current_revision: 2
+        cart:
+          replicas: 2
+          revisions: {1: "shop/cart:0.9.0"}
+          current_revision: 1
+          failure: oomkilled
+      payments:
+        api:
+          replicas: 3
+          revisions: {1: "payments/api:3.0.0", 2: "payments/api:3.0.4", 3: "payments/api:3.1.0"}
+          current_revision: 3
+          failure: stuck_rollout
+      staging:
+        search:
+          replicas: 1
+          revisions: {1: "staging/search:0.1.0"}
+          current_revision: 1
+          failure: image_pull
+    failures:
+      crashloop:
+        pod_status: CrashLoopBackOff
+        restarts: 12
+        log: "panic: dial tcp 10.0.3.7:6379: connect: connection refused"
+        event: "Back-off restarting failed container checkout"
+        fixed_by: rollback_deployment
+        good_revisions: [2]
+      oomkilled:
+        pod_status: OOMKilled
+        restarts: 5
+        log: "fatal error: runtime: out of memory"
+        event: "Container cart exceeded its memory limit (256Mi)"
+        fixed_by: restart_deployment       # transient in this scenario: a restart clears it
+      stuck_rollout:
+        pod_status: Running
+        condition: ProgressDeadlineExceeded
+        after_s: 600
+        event: "Deployment payments/api has timed out progressing"
+        fixed_by: rollback_deployment
+        good_revisions: [2]
+      image_pull:
+        pod_status: ImagePullBackOff
+        restarts: 0
+        log: ""
+        event: "Failed to pull image \"staging/search:0.1.0\": manifest unknown"
+        fixed_by: rollback_deployment
+        good_revisions: []                 # nothing to roll back to: the agent should escalate

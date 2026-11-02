@@ -283,7 +283,7 @@ class _RacyLedger(MemoryLedger):
         super().__init__()
         self.calls = 0
 
-    def used(self, label: str, day: str) -> int:
+    def used(self, label: str) -> int:
         self.calls += 1
         return 0 if self.calls == 1 else 10**9
 

@@ -1,0 +1,20 @@
+# mcp-ops (Phase 3; design doc p9-11). Read by sre_shared.config.load_mcp_ops_config.
+
+namespaces:
+  allowed: [shop, payments, staging]   # tools act nowhere else, whatever the token says
+  protected: [payments]                # writes here need an admin's approval
+
+backend: simulator                     # simulator (lab, demo) | kind (CI)
+
+simulator:
+  scenario: default                    # config/simulator/scenarios.yaml
+  seed: 7                              # outcomes are hash(seed, idempotency key): retries agree
+
+logs:
+  max_bytes: 16384                     # get_logs is size-capped (tool output is data, and costly)
+
+tasks:
+  store: memory://                     # lab may use redis://127.0.0.1:6379/1; never Upstash
+  redelivery_timeout_s: 120
+
+rotations: [sre-primary]               # page_oncall targets (a row in `pages`; no external pager)

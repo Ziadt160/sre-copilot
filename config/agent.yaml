@@ -1,0 +1,47 @@
+# Agent graph (Phase 3; design doc p7-9). Read by sre_shared.config.load_agent_config.
+# Every value is a starting point to be measured on the agent-v1 task set.
+
+limits:
+  llm_decisions_per_turn: 6     # design: at most 6 steps per turn (counted in graph state)
+  tool_calls_per_turn: 2        # design: at most 2 tool calls per turn
+  recursion_limit: 25           # LangGraph backstop only; the action path alone is ~10 graph steps
+  answer_token_budget: 5000     # tokens per turn (limits.yaml budgets.answer_token_budget)
+
+approval:
+  ttl_minutes: 15               # design: approvals expire after 15 minutes
+  sweep_interval_s: 60
+
+confidence_floor: 0.5           # router/answer confidence below this escalates (to calibrate)
+
+complex:
+  max_subquestions: 3           # design: split into 3 or fewer
+
+memory:
+  recent_turns: 6               # turns kept verbatim; older turns fold into the rolling summary
+  summary_max_tokens: 300
+
+models:                         # role -> first choice; fallbacks follow limits.yaml provider order
+  rewrite: groq:openai/gpt-oss-20b
+  router: groq:openai/gpt-oss-20b
+  answer: groq:openai/gpt-oss-20b
+  synthesize: groq:openai/gpt-oss-120b
+  grounding: groq:openai/gpt-oss-20b
+  summary: groq:openai/gpt-oss-20b
+  lab: ollama:qwen2.5:7b        # lab volume runs (no quota); tests use fakes
+
+fallback:
+  providers: [groq, openrouter, cloudflare_workers_ai, nvidia]
+  extractive_last: true         # last resort: top passages quoted with citations, no model
+
+cache:
+  exact_ttl_s: 3600
+  semantic_ttl_s: 86400
+  semantic_min_similarity: 0.92 # to calibrate on paraphrases; literal tokens must match exactly
+
+budgets:
+  user_daily_tokens: 20000      # per user per day (Redis in the lab, Upstash in the demo)
+
+mcp:
+  token_ttl_s: 120              # the core -> mcp-ops token (contracts/ops.py caps it at 300 s)
+  poll_interval_s: 2
+  operation_timeout_s: 660      # a stuck rollout fails at ProgressDeadlineExceeded (600 s)

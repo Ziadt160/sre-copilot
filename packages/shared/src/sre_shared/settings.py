@@ -71,6 +71,16 @@ class Settings(BaseSettings):
     )
     ollama_base_url: str = "http://127.0.0.1:11434"
 
+    # Phase 3: agent and mcp-ops.
+    redis_url: str | None = None  # lab: redis://127.0.0.1:6379/0 (compose profile agent)
+    mcp_ops_url: str = "http://127.0.0.1:8100/mcp"
+    mcp_token_secret: SecretStr | None = (
+        None  # HS256 key core signs mcp-ops tokens with (32+ bytes)
+    )
+    fastmcp_tasks_encryption_key: SecretStr | None = None  # encrypts credentials in task snapshots
+    cloudflare_account_id: str | None = None  # Workers AI (fallback chain)
+    cloudflare_api_token: SecretStr | None = None
+
     # Observability.
     langsmith_api_key: SecretStr | None = None
     langsmith_project: str = "sre-copilot"

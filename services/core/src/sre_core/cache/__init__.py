@@ -1,1 +1,1 @@
-"""Caches (exact answer, semantic, retrieval, embedding). Phase 2."""
+"""Caches: exact (Redis) and semantic (pgvector), scoped by access groups (Phase 3, T14)."""

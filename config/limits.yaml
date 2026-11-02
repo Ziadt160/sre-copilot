@@ -18,12 +18,22 @@ providers:
     base_url: https://openrouter.ai/api/v1
     key_env: OPENROUTER_API_KEY
     allowed_for: [user_traffic, lab_jobs]
-    account: {rpm: 20, rpd: 50}
-    models: []            # ":free" models rotate; reviewed monthly
+    account: {rpm: 20, rpd: 50}   # free tier without purchased credits
+    # ":free" models rotate; reviewed monthly. No free gpt-oss: these are the fallback's
+    # nearest. tpd is our own cap (OpenRouter publishes requests, not tokens).
+    models:
+      google/gemma-4-31b-it:free:              {rpm: 20, rpd: 50, tpd: 200000}
+      nvidia/nemotron-3-ultra-550b-a55b:free:  {rpm: 20, rpd: 50, tpd: 200000}
   cloudflare_workers_ai:
     order: 3
+    # {cloudflare_account_id} is filled from settings by the model router (T14); key and
+    # account id are not set in the lab yet, so the router skips this provider until they are.
+    base_url: https://api.cloudflare.com/client/v4/accounts/{cloudflare_account_id}/ai/v1
+    key_env: CLOUDFLARE_API_TOKEN
     allowed_for: [user_traffic]
-    account: {neurons_per_day: 10000}
+    account: {neurons_per_day: 10000}   # about 115 answers a day
+    models:
+      "@cf/openai/gpt-oss-20b": {tpd: 100000}   # our own cap, below the neuron budget
   nvidia:
     order: 4
     base_url: https://integrate.api.nvidia.com/v1
@@ -38,6 +48,7 @@ providers:
       mistralai/mistral-large-4-1t-a52b:    {rpm: 40, tpd: 1000000}
       nvidia/nemotron-3-ultra-550b-a55b:    {rpm: 40, tpd: 1000000}
       deepseek-ai/deepseek-v4.1-flash:      {rpm: 40, tpd: 1000000}
+      openai/gpt-oss-20b:                   {rpm: 40, tpd: 1000000}   # the fallback for the 20b roles
   ollama:
     order: lab
     base_url: http://127.0.0.1:11434

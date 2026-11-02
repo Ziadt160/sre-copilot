@@ -21,6 +21,23 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # --- profile `agent` (Phase 3): Redis for the exact cache, budgets and the mcp-ops task
+  # store in the lab (`--profile agent up -d redis`). Ephemeral: no persistence, 64 MB, LRU.
+  # The demo uses Upstash for caches and budgets only, never for the task store.
+  redis:
+    profiles: ["agent"]
+    image: ${SRE_REDIS_IMAGE:-redis:7.4-alpine}
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb",
+              "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   # --- profile `replica`: a primary and a streaming hot standby, for the read-routing and load
   # experiments. `docker compose -f infra/compose.lab.yml --profile replica up -d`, then
   # `uv run python infra/postgres/schema.py` builds the schema on the primary (the standby

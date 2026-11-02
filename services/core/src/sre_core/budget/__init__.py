@@ -1,1 +1,1 @@
-"""Token and request budgets per user, request and model. Phase 2."""
+"""Token budgets per user per day and per request (Phase 3, T14)."""

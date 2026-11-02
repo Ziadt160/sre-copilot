@@ -26,6 +26,7 @@ dev = [
     "pre-commit>=4.0",
     "types-PyYAML",
     "locust>=2.32",
+    "fakeredis>=2.26",  # Redis for cache/budget tests without a container
 ]
 
 [tool.uv]
@@ -103,29 +104,46 @@ markers = [
 
 # --- module boundaries ------------------------------------------------------
 [tool.importlinter]
-root_packages = ["sre_shared", "sre_core", "sre_ingest", "sre_evals"]
+root_packages = ["sre_shared", "sre_core", "sre_ingest", "sre_evals", "sre_mcp_ops"]
 
 [[tool.importlinter.contracts]]
 name = "shared depends on no other first-party package"
 type = "forbidden"
 source_modules = ["sre_shared"]
+forbidden_modules = ["sre_core", "sre_ingest", "sre_evals", "sre_mcp_ops"]
+
+[[tool.importlinter.contracts]]
+name = "core does not import ingest, evals or mcp-ops"
+type = "forbidden"
+source_modules = ["sre_core"]
+forbidden_modules = ["sre_ingest", "sre_evals", "sre_mcp_ops"]
+
+[[tool.importlinter.contracts]]
+name = "ingest does not import core, evals or mcp-ops"
+type = "forbidden"
+source_modules = ["sre_ingest"]
+forbidden_modules = ["sre_core", "sre_evals", "sre_mcp_ops"]
+
+[[tool.importlinter.contracts]]
+name = "mcp-ops is its own service: it shares only sre_shared (contracts) with core"
+type = "forbidden"
+source_modules = ["sre_mcp_ops"]
 forbidden_modules = ["sre_core", "sre_ingest", "sre_evals"]
 
 [[tool.importlinter.contracts]]
-name = "core does not import ingest or evals"
-type = "forbidden"
-source_modules = ["sre_core"]
-forbidden_modules = ["sre_ingest", "sre_evals"]
-
-[[tool.importlinter.contracts]]
-name = "ingest does not import core or evals"
-type = "forbidden"
-source_modules = ["sre_ingest"]
-forbidden_modules = ["sre_core", "sre_evals"]
-
-[[tool.importlinter.contracts]]
-name = "core layers: api, agent, answer, retrieval"
+name = "core layers: api > agent > (answer | store | cache | budget | review) > retrieval"
 type = "layers"
-layers = ["sre_core.api", "sre_core.agent", "sre_core.answer", "sre_core.retrieval"]
+layers = [
+    "sre_core.api",
+    "sre_core.agent",
+    "sre_core.answer | sre_core.store | sre_core.cache | sre_core.budget | sre_core.review",
+    "sre_core.retrieval",
+]
 containers = []
 exhaustive = false
+
+[[tool.importlinter.contracts]]
+name = "the agent reaches threads, approvals and the outbox only through its ports"
+type = "forbidden"
+source_modules = ["sre_core.agent"]
+forbidden_modules = ["sre_core.store"]
