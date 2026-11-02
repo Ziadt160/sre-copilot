@@ -67,30 +67,11 @@ class Admission:
 
 
 def _view(row: Row, *, replayed: bool = False) -> dict[str, Any]:
-    """The operation as callers see it (also what a write's task returns)."""
-
-    def iso(v: Any) -> str | None:
-        return v.isoformat() if v is not None else None
-
-    return {
-        "operation_id": str(row["id"]),
-        "idempotency_key": row["idempotency_key"],
-        "status": row["status"],
-        "kind": row["kind"],
-        "tool": row["tool"],
-        "namespace": row["namespace"],
-        "target": row["target"],
-        "args": row["args"],
-        "result": row["result"],
-        "error": row["error"],
-        "task_id": row["task_id"],
-        "approval_id": str(row["approval_id"]) if row["approval_id"] else None,
-        "latency_ms": row["latency_ms"],
-        "created_at": iso(row["created_at"]),
-        "started_at": iso(row["started_at"]),
-        "finished_at": iso(row["finished_at"]),
-        "replayed": replayed,
-    }
+    """The operation as callers see it (also what a write's task returns): the shared
+    `OperationRecord` contract, so the agent parses it with the same model, plus `replayed`."""
+    fields = ops.OperationRecord.model_fields
+    record = ops.OperationRecord.model_validate({k: row[k] for k in fields if k in row})
+    return {**record.model_dump(mode="json"), "replayed": replayed}
 
 
 def _validation_reason(exc: ValidationError) -> str:

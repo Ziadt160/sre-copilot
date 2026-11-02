@@ -48,7 +48,7 @@ async def test_replay_returns_the_same_operation_and_changes_state_once(
     t, appr = await approved(rig)
     first = await rig.write("restart_deployment", WEB, rig.token(thread_id=t, approval_id=appr))
     second = await rig.write("restart_deployment", WEB, rig.token(thread_id=t, approval_id=appr))
-    assert first["operation_id"] == second["operation_id"]
+    assert first["id"] == second["id"]
     assert first["replayed"] is False and second["replayed"] is True
     assert second["result"] == first["result"] and second["status"] == "succeeded"
     assert len(sim.mutation_log()) == 1 and duplicates(sim) == 0
@@ -65,7 +65,7 @@ async def test_first_reply_dropped_then_the_client_retries(rig: Rig, sim: Simula
             break
         await asyncio.sleep(0.05)
     retry = await rig.write("restart_deployment", WEB, rig.token(thread_id=t, approval_id=appr))
-    assert retry["replayed"] is True and retry["operation_id"] == str(rows[0]["id"])
+    assert retry["replayed"] is True and retry["id"] == str(rows[0]["id"])
     assert len(sim.mutation_log()) == 1
 
 
@@ -75,7 +75,7 @@ async def test_two_concurrent_identical_calls(rig: Rig, sim: SimulatorBackend) -
         *(rig.write("restart_deployment", WEB, rig.token(thread_id=t, approval_id=appr))
           for _ in range(2))
     )  # fmt: skip
-    assert a["operation_id"] == b["operation_id"]
+    assert a["id"] == b["id"]
     assert sorted([a["replayed"], b["replayed"]]) == [False, True]
     assert a["status"] == b["status"] == "succeeded"
     assert len(sim.mutation_log()) == 1 and len(await rig.rows("kind = 'write'")) == 1
@@ -93,7 +93,7 @@ async def test_a_redelivered_task_body_changes_state_once(rig: Rig, sim: Simulat
     views = await asyncio.gather(
         *(rig.service.execute(claims, "restart_deployment", args, f"task-{i}") for i in range(3))
     )
-    assert len({v["operation_id"] for v in views}) == 1
+    assert len({v["id"] for v in views}) == 1
     assert [v["status"] for v in views] == ["succeeded"] * 3
     again = await rig.service.execute(claims, "restart_deployment", args, "task-late")
     assert again["replayed"] is True
@@ -136,7 +136,7 @@ async def test_double_approval_click_runs_once(rig: Rig, sim: SimulatorBackend) 
     two = await rig.write(
         "restart_deployment", WEB, rig.token(thread_id=t, approval_id=appr, max_calls=1)
     )
-    assert one["operation_id"] == two["operation_id"] and len(sim.mutation_log()) == 1
+    assert one["id"] == two["id"] and len(sim.mutation_log()) == 1
     # The same approval cannot buy a second change in another turn.
     async with rig.client(rig.token(thread_id=t, approval_id=appr, turn=2)) as c:
         with pytest.raises(ToolError, match="another turn"):
@@ -165,7 +165,7 @@ async def test_escalation_is_idempotent_too(rig: Rig, sim: SimulatorBackend) -> 
     args = {"severity": "sev2", "title": "checkout down", "summary": "crash loop"}
     one = await rig.write("create_incident", args, rig.token(thread_id=t))
     two = await rig.write("create_incident", args, rig.token(thread_id=t))
-    assert one["operation_id"] == two["operation_id"] and two["replayed"] is True
+    assert one["id"] == two["id"] and two["replayed"] is True
     cur = await rig.db.execute("select count(*) as n from public.incidents")
     assert (await cur.fetchone())["n"] == 1  # type: ignore[index]
     assert [e["tool"] for e in sim.mutation_log()] == ["create_incident"]

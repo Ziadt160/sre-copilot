@@ -124,7 +124,7 @@ async def test_get_operation_is_private_to_its_subject(rig: Rig) -> None:
     out = await rig.write(
         "scale_deployment", args, await approved_token(rig, "scale_deployment", args)
     )
-    op = out["operation_id"]
+    op = out["id"]
     mine = await rig.read("get_operation", {"operation_id": op}, rig.token())
     assert mine["status"] == "succeeded"
     async with rig.client(rig.token(sub="mallory")) as c:
@@ -133,4 +133,4 @@ async def test_get_operation_is_private_to_its_subject(rig: Rig) -> None:
     admin = await rig.read(
         "get_operation", {"operation_id": op}, rig.token(sub="root", scopes=("viewer", "admin"))
     )
-    assert admin["operation_id"] == op
+    assert admin["id"] == op
