@@ -31,3 +31,6 @@ Thumbs.db
 
 # claude code local state
 .claude/worktrees/
+
+# Local Claude Code state (worktrees, launch configs)
+.claude/
