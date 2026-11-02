@@ -122,6 +122,18 @@ class MemoryApprovalStore:
         self.items[approval_id] = a.model_copy(update=update)
         return self.items[approval_id]
 
+    async def claim_execution(self, approval_id: uuid.UUID) -> ops.ApprovalRecord | None:
+        a = self.items.get(approval_id)
+        if (
+            a is None
+            or a.status != "approved"
+            or a.execution_claimed_at is not None
+            or a.expires_at <= self.clock()
+        ):
+            return None
+        self.items[approval_id] = a.model_copy(update={"execution_claimed_at": self.clock()})
+        return self.items[approval_id]
+
     async def mark_executed(self, approval_id: uuid.UUID) -> None:
         a = self.items[approval_id]
         self.items[approval_id] = a.model_copy(update={"status": "executed"})
@@ -129,7 +141,8 @@ class MemoryApprovalStore:
     async def expire_due(self) -> list[ops.ApprovalRecord]:
         now, out = self.clock(), []
         for k, a in self.items.items():
-            if a.status == "pending" and a.expires_at <= now:
+            unclaimed = a.status == "approved" and a.execution_claimed_at is None
+            if (a.status == "pending" or unclaimed) and a.expires_at <= now:
                 self.items[k] = a.model_copy(update={"status": "expired"})
                 out.append(self.items[k])
         return out

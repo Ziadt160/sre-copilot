@@ -3,7 +3,8 @@
 
 limits:
   llm_decisions_per_turn: 6     # design: at most 6 steps per turn (counted in graph state)
-  tool_calls_per_turn: 2        # design: at most 2 tool calls per turn
+  tool_calls_per_turn: 2        # design: at most 2 tool calls per turn; escalation (incident +
+                                # page) is exempt: it is the safe exit, bounded at 2 calls (V07-5)
   recursion_limit: 25           # LangGraph backstop only; the action path alone is ~10 graph steps
   answer_token_budget: 5000     # tokens per turn (limits.yaml budgets.answer_token_budget)
 

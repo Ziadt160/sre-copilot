@@ -135,10 +135,17 @@ class ApprovalStore(Protocol):
         """The decided record, or None when it was not pending or has expired (409)."""
         ...
 
+    async def claim_execution(self, approval_id: uuid.UUID) -> ApprovalRecord | None:
+        """Claim an approved, unexpired approval for its one execution, atomically: the claimed
+        record, or None when it is not approved, has expired, or another resume claimed it."""
+        ...
+
     async def mark_executed(self, approval_id: uuid.UUID) -> None: ...
 
     async def expire_due(self) -> list[ApprovalRecord]:
-        """Mark every pending approval past `expires_at` expired; return them (the sweeper)."""
+        """Mark expired every approval past `expires_at` that is pending, or approved but never
+        claimed for execution (a crash between decision and resume); return them (the sweeper,
+        which then resumes their threads)."""
         ...
 
 

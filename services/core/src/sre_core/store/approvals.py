@@ -3,7 +3,7 @@
 The gate's guarantees are single conditional updates, so they hold under concurrency and across
 processes: `decide` succeeds once and only while the row is pending and unexpired (`expires_at`
 is compared with the database clock, never the caller's), and `expire_due` moves every overdue
-pending row to `expired`.
+pending row to `expired`. `claim_execution` lets exactly one resume execute an approval.
 """
 
 from __future__ import annotations
@@ -19,10 +19,11 @@ from sre_shared.contracts import ops
 from sre_shared.db import as_user
 from sre_shared.models import Claims
 
-_COLS = (
+_INSERT_COLS = (
     "id, thread_id, turn, tool, args, args_hash, namespace, target, risk, required_scope, "
     "expected_effect, status, requested_by, decided_by, decided_at, expires_at, created_at"
 )
+_COLS = _INSERT_COLS + ", execution_claimed_at"
 
 
 def _record(row: Mapping[str, Any]) -> ops.ApprovalRecord:
@@ -36,7 +37,7 @@ class PgApprovalStore:
     async def create(self, approval: ops.ApprovalRecord) -> ops.ApprovalRecord:
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                f"insert into public.approvals ({_COLS}) "
+                f"insert into public.approvals ({_INSERT_COLS}) "
                 "values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
                 "coalesce(%s, now())) "
                 f"returning {_COLS}",
@@ -96,6 +97,17 @@ class PgApprovalStore:
             row = await cur.fetchone()
         return _record(row) if row else None
 
+    async def claim_execution(self, approval_id: uuid.UUID) -> ops.ApprovalRecord | None:
+        async with self.pool.connection() as conn:
+            cur = await conn.execute(
+                "update public.approvals set execution_claimed_at = now() "
+                "where id = %s and status = 'approved' and execution_claimed_at is null "
+                f"and expires_at > now() returning {_COLS}",
+                [approval_id],
+            )
+            row = await cur.fetchone()
+        return _record(row) if row else None
+
     async def mark_executed(self, approval_id: uuid.UUID) -> None:
         async with self.pool.connection() as conn:
             await conn.execute(
@@ -107,8 +119,9 @@ class PgApprovalStore:
     async def expire_due(self) -> list[ops.ApprovalRecord]:
         async with self.pool.connection() as conn:
             cur = await conn.execute(
-                "update public.approvals set status = 'expired' "
-                f"where status = 'pending' and expires_at <= now() returning {_COLS}"
+                "update public.approvals set status = 'expired' where expires_at <= now() and "
+                "(status = 'pending' or (status = 'approved' and execution_claimed_at is null)) "
+                f"returning {_COLS}"
             )
             return [_record(r) for r in await cur.fetchall()]
 

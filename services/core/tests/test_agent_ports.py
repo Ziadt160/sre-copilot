@@ -77,7 +77,8 @@ async def test_an_approval_is_decided_once_and_never_after_it_expires() -> None:
     )
     clock[0] = now + timedelta(minutes=16)
     assert (await store.decide(late.id, decision="approved", decided_by="alice")) is None
-    assert [x.id for x in await store.expire_due()] == [late.id]
+    # `a` was approved but never claimed for execution before its deadline: it expires too (V07-9)
+    assert [x.id for x in await store.expire_due()] == [a.id, late.id]
 
 
 async def test_the_fake_agent_pauses_for_approval_and_resumes_from_the_record() -> None:

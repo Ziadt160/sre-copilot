@@ -354,11 +354,6 @@ async def test_an_edit_rewrites_the_level_risk_and_effect_the_record_shows(
     assert len(writes(rt)) == 1  # the admin approved this exact call, so it should run
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V07-9: an approval left 'approved' by a crash before the resume is never swept; "
-    "the thread stays awaiting_approval (409) forever",
-)
 async def test_a_crash_between_decision_and_resume_does_not_strand_the_thread(
     client: httpx.AsyncClient, rt: Runtime, db: object
 ) -> None:
@@ -456,8 +451,13 @@ async def test_api_roles_cannot_write_messages_or_approvals_directly(
             col = "id" if table == "threads" else "thread_id"
             cur = await conn.execute(f"select count(*) from public.{table} where {col} = %s", [tid])
             assert cast(Any, await cur.fetchone())["count"] == 0, table
-        cur = await conn.execute("update public.threads set status = 'active' where id = %s", [tid])
-        assert cur.rowcount == 0
+    # Users may not write a thread's status at all now (V07-10), not even on rows RLS hides.
+    async with pool.connection() as conn:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            async with as_user(conn, bob):
+                await conn.execute(
+                    "update public.threads set status = 'active' where id = %s", [tid]
+                )
     async with pool.connection() as conn:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             async with as_user(conn, bob):
@@ -468,11 +468,6 @@ async def test_api_roles_cannot_write_messages_or_approvals_directly(
     assert rec is not None and rec.status == "pending"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V07-10: authenticated has UPDATE on public.threads: an owner can reset status, "
-    "next_turn and summary through the REST API",
-)
 async def test_an_owner_cannot_rewrite_the_threads_status_or_turn_counter(
     client: httpx.AsyncClient, rt: Runtime, pool: AsyncConnectionPool
 ) -> None:

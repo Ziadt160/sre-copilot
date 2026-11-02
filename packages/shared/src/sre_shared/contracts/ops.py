@@ -338,6 +338,9 @@ class ApprovalRecord(BaseModel):
     decided_at: datetime | None = None
     expires_at: datetime
     created_at: datetime | None = None
+    # Set once, by the resume that executes the approval (V07-1); mcp-ops still requires
+    # status 'approved', so the claim is a column, not a status.
+    execution_claimed_at: datetime | None = None
 
 
 # --- the core -> mcp-ops token ---------------------------------------------------------------

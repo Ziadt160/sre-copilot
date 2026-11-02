@@ -78,20 +78,26 @@ class PgThreadStore:
             return [ThreadRecord.model_validate(r) for r in await cur.fetchall()]
 
     async def claim_turn(self, claims: Claims, thread_id: uuid.UUID) -> int:
-        """One conditional update: the row lock orders concurrent claims, RLS limits it to the
-        owner, and `status = 'active'` refuses a thread that waits on an approval or a human."""
+        """One conditional update: the row lock orders concurrent claims, the owner check limits
+        it to the caller's thread, and `status = 'active'` refuses a thread that waits on an
+        approval or a human. It runs on the service connection: users may not write a thread's
+        turn counter or status themselves (V07-10), so the owner check is explicit here."""
         if not _is_user(claims):
             raise ThreadNotFound(str(thread_id))
-        async with self.pool.connection() as conn, as_user(conn, claims):
+        async with self.pool.connection() as conn:
             cur = await conn.execute(
                 "update public.threads set next_turn = next_turn + 1, updated_at = now() "
-                "where id = %s and status = 'active' returning next_turn - 1 as turn",
-                [thread_id],
+                "where id = %s and owner_sub = %s and status = 'active' "
+                "returning next_turn - 1 as turn",
+                [thread_id, claims.sub],
             )
             row = await cur.fetchone()
             if row is not None:
                 return int(row["turn"])
-            cur = await conn.execute("select status from public.threads where id = %s", [thread_id])
+            cur = await conn.execute(
+                "select status from public.threads where id = %s and owner_sub = %s",
+                [thread_id, claims.sub],
+            )
             existing = await cur.fetchone()
         if existing is None:
             raise ThreadNotFound(str(thread_id))
