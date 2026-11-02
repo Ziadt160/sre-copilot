@@ -32,7 +32,7 @@ from sre_core.agent.ports import (
 from sre_core.answer.service import ConfigError
 from sre_core.api.auth import claims_from_authorization
 from sre_core.api.runs import RunManager, resume_source, sweep_once
-from sre_core.api.runtime import Runtime
+from sre_core.api.runtime import Runtime, register_default_handlers
 from sre_core.retrieval import NoActiveCorpusError
 from sre_core.store.approvals import PgApprovalStore
 from sre_core.store.feedback import PgFeedbackStore
@@ -76,6 +76,7 @@ def services(rt: Runtime) -> ChatServices:
     svc: ChatServices | None = rt.extras.get("chat")
     if svc is None:
         cfg = load_agent_config()
+        register_default_handlers()
         svc = ChatServices(
             manager=RunManager(rt.threads),
             planned_tokens=cfg.limits.answer_token_budget,
@@ -472,13 +473,22 @@ async def post_feedback(
     store = _feedback_store(rt)
     await _owned_turn(rt, claims, body.thread_id, body.turn)
     await store.save_feedback(claims, body)
-    # Once per (thread, turn, user): the handler reads the current rows, so a changed rating
-    # later does not need a second item.
-    await rt.outbox.enqueue(
-        "feedback_sync",
-        f"feedback:{body.thread_id}:{body.turn}:{claims.sub}",
-        {"thread_id": str(body.thread_id), "turn": body.turn, "owner_sub": claims.sub},
-    )
+    if body.rating is not None:
+        trace_run_id = None
+        for msg in await rt.threads.messages(claims, body.thread_id, last=50):
+            if msg.turn == body.turn and msg.role == "assistant":
+                trace_run_id = msg.trace_run_id
+        # Once per (thread, turn, user), the payload `feedback_sync` (T16) documents.
+        await rt.outbox.enqueue(
+            "feedback_sync",
+            f"feedback:{body.thread_id}:{body.turn}:{claims.sub}",
+            {
+                "trace_run_id": trace_run_id,
+                "owner_sub": claims.sub,
+                "rating": body.rating,
+                "reason": body.reason,
+            },
+        )
     services(rt).drain()
     return {"status": "stored"}
 

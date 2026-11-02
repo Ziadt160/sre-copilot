@@ -120,8 +120,12 @@ class OutboxDrainer:
 
 
 async def _drain_cli(handlers: list[str]) -> int:
-    for module in handlers:
-        importlib.import_module(module)
+    for spec in handlers:  # "pkg.module" or "pkg.module:HANDLERS" (a dict kind -> handler)
+        module, _, attr = spec.partition(":")
+        mod = importlib.import_module(module)
+        if attr:
+            for kind, fn in getattr(mod, attr).items():
+                register_outbox_handler(kind, fn)
     pool = create_pool(min_size=1, max_size=2)
     await pool.open()
     try:
@@ -136,8 +140,8 @@ def main(argv: list[str] | None = None) -> None:
     drain = sub.add_parser("drain", help="run handlers for pending outbox rows once")
     drain.add_argument(
         "--handlers",
-        default="",
-        help="comma-separated modules that call register_outbox_handler on import",
+        default="sre_core.review.feedback_sync:HANDLERS",
+        help="comma-separated modules (or module:DICT) that register outbox handlers",
     )
     args = parser.parse_args(argv)
     modules = [m for m in args.handlers.split(",") if m]

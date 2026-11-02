@@ -29,6 +29,7 @@ from sre_core.store.factory import (
     make_outbox,
     make_thread_store,
 )
+from sre_core.store.outbox import register_outbox_handler
 from sre_shared.config import load_agent_config, load_mcp_ops_config
 from sre_shared.contracts.ops import NamespacePolicy
 from sre_shared.db import create_pool
@@ -60,10 +61,19 @@ def _factory(module: str, name: str) -> Callable[..., Any]:
     return fn
 
 
+def register_default_handlers() -> None:
+    """Outbox handlers other tasks own (T16's `feedback_sync`); idempotent."""
+    from sre_core.review.feedback_sync import HANDLERS
+
+    for kind, fn in HANDLERS.items():
+        register_outbox_handler(kind, fn)
+
+
 async def build_runtime(settings: Any, *, retriever: Any = None, answerer: Any = None) -> Runtime:
     """Wire the real implementations. A `retriever`/`answerer` already built by the app (its
     pool and replica) are reused; otherwise they are built here. Pools opened here are listed in
     `extras["pools"]` for `close_runtime`."""
+    register_default_handlers()
     pool = create_pool(min_size=1, max_size=8)
     await pool.open()
     pools = [pool]
@@ -87,7 +97,11 @@ async def build_runtime(settings: Any, *, retriever: Any = None, answerer: Any =
         outbox = make_outbox(pool)
         cache = _factory("sre_core.cache.factory", "make_answer_cache")(pool, settings)
         budget = _factory("sre_core.budget.factory", "make_budget_guard")(settings)
-        models = _factory("sre_core.agent.models", "make_model_router")(settings)
+        from sre_core.review.tracing import client_wrapper
+
+        models = _factory("sre_core.agent.models", "make_model_router")(
+            settings, client_wrapper=client_wrapper(settings)
+        )
         ops_client = _factory("sre_core.agent.ops_client", "make_ops_client")(settings)
         agent = _factory("sre_core.agent.factory", "make_chat_agent")(
             threads=threads, approvals=approvals, ops=ops_client, cache=cache, budget=budget,
