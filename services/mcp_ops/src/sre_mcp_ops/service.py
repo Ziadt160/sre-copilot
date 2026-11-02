@@ -16,11 +16,13 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import psycopg.errors
 from fastmcp.exceptions import ToolError
 from pydantic import ValidationError
 
 from sre_mcp_ops.backends.base import BackendError, ClusterBackend
-from sre_mcp_ops.store import REFUSED_SUFFIX, OpsStore, Row
+from sre_mcp_ops.reconcile import settle_row
+from sre_mcp_ops.store import REFUSED_SUFFIX, REPLAY_SUFFIX, OpsStore, Row
 from sre_shared.config import McpOpsConfig
 from sre_shared.contracts import ops
 from sre_shared.contracts.ops import McpTokenClaims
@@ -80,6 +82,24 @@ def _validation_reason(exc: ValidationError) -> str:
     return f"invalid arguments: {', '.join(bad)}"
 
 
+def _unstorable(value: Any) -> bool:
+    """A NUL, or a lone surrogate, cannot be stored in Postgres text or jsonb: refuse it before
+    any insert (V06-2) rather than lose the audit row."""
+    if isinstance(value, str):
+        if "\x00" in value:
+            return True
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return True
+        return False
+    if isinstance(value, dict):
+        return any(_unstorable(k) or _unstorable(v) for k, v in value.items())
+    if isinstance(value, list | tuple):
+        return any(_unstorable(v) for v in value)
+    return False
+
+
 def _audit_args(raw: dict[str, Any]) -> dict[str, Any]:
     text = json.dumps(raw, default=str)
     if len(text) <= MAX_AUDIT_ARGS_BYTES:
@@ -116,27 +136,47 @@ class OpsService:
     ) -> ToolError:
         op_id = uuid.uuid4()
         known = tool in ops.TOOL_ARGS
-        await self.store.insert_audit(
-            {
-                "id": op_id,
-                "idempotency_key": f"{key or 'invalid'}{REFUSED_SUFFIX}{op_id}",
-                "kind": ops.tool_kind(tool) if known else "read",
-                "tool": tool[:100],
-                "args": _audit_args(raw),
-                "namespace": raw.get("namespace")
-                if isinstance(raw.get("namespace"), str)
-                else None,
-                "target": None,
-                "subject": claims.sub,
-                "scopes": list(claims.scopes),
-                "thread_id": claims.thread_id,
-                "turn": claims.turn,
-                "approval_id": claims.approval_id,
-                "status": "refused",
-                "error": reason,
-                "latency_ms": (time.monotonic() - started) * 1000,
-            }
-        )
+        bad = _unstorable(tool) or _unstorable(raw)
+        ns = raw.get("namespace")
+        approval_id = claims.approval_id
+        if approval_id is not None and await self.store.get_approval(approval_id) is None:
+            # The audit row's approval_id is a foreign key: a claimed id with no row (V06-1)
+            # is recorded in the text instead, so the refusal can still be written.
+            reason = f"{reason} (token claimed approval {approval_id})"
+            approval_id = None
+        row = {
+            "id": op_id,
+            "idempotency_key": f"{key or 'invalid'}{REFUSED_SUFFIX}{op_id}",
+            "kind": ops.tool_kind(tool) if known else "read",
+            "tool": ("<unprintable tool name>" if bad and not known else tool)[:100],
+            "args": {"rejected": "NUL or invalid text in the call"} if bad else _audit_args(raw),
+            "namespace": ns if isinstance(ns, str) and not bad else None,
+            "target": None,
+            "subject": claims.sub,
+            "scopes": list(claims.scopes),
+            "thread_id": claims.thread_id,
+            "turn": claims.turn,
+            "approval_id": approval_id,
+            "status": "refused",
+            "error": reason,
+            "latency_ms": (time.monotonic() - started) * 1000,
+        }
+        try:
+            await self.store.insert_audit(row)
+        except Exception:
+            log.exception("audit insert failed; writing a minimal row")
+            await self.store.insert_audit(
+                {
+                    **row,
+                    "tool": "<unrecorded>",
+                    "args": {"unrecorded": True},
+                    "namespace": None,
+                    "approval_id": None,
+                    "thread_id": None,
+                    "idempotency_key": f"invalid{REFUSED_SUFFIX}{op_id}",
+                    "error": "refused (details could not be recorded)",
+                }
+            )
         return ToolError(f"refused: {reason}")
 
     async def admit(self, claims: McpTokenClaims, tool: str, raw: dict[str, Any]) -> Admission:
@@ -145,8 +185,16 @@ class OpsService:
             raise await self._refuse(
                 claims, tool, raw, "max_calls for this token is used up", started
             )
+        if _unstorable(tool) or _unstorable(raw):
+            raise await self._refuse(
+                claims, tool, raw, "arguments hold a NUL or invalid text", started
+            )
         if tool not in ops.TOOL_ARGS:
             raise await self._refuse(claims, tool, raw, "unknown tool", started)
+        if claims.tools is not None and tool not in claims.tools:
+            raise await self._refuse(
+                claims, tool, raw, f"this token is not valid for {tool}", started
+            )
         try:
             args = ops.parse_args(tool, raw)
         except ValidationError as exc:
@@ -183,6 +231,11 @@ class OpsService:
             )
             return Admission(tool, kind, args, started, read_id=row["id"])
 
+        if kind == "escalation" and claims.approval_id is None and claims.tools is None:
+            # The escalate route needs no approval, so the token itself must name the tool (O-3).
+            raise await self._refuse(
+                claims, tool, raw, f"{tool} without an approval needs a token bound to it", started
+            )
         if claims.thread_id is None or claims.turn is None:
             raise await self._refuse(
                 claims, tool, raw, f"{tool} needs a token bound to a turn", started
@@ -206,6 +259,7 @@ class OpsService:
                     claims, tool, raw, "operation belongs to another caller", started, key
                 )
             if stored["status"] != "approved":
+                await self._audit_replay(claims, stored, started)
                 return Admission(tool, kind, args, started, op=stored)  # a replay: nothing to check
             # Stored but never started (a lost task): it may only start again if still approved.
 
@@ -213,7 +267,7 @@ class OpsService:
             reason = await self._check_approval(claims, tool, args, level)
             if reason is not None:
                 raise await self._refuse(claims, tool, raw, reason, started, key)
-        row, _created = await self.store.insert_first(
+        row, created = await self.store.insert_first(
             {
                 "id": uuid.uuid4(),
                 "idempotency_key": key,
@@ -234,7 +288,34 @@ class OpsService:
             raise await self._refuse(
                 claims, tool, raw, "operation belongs to another caller", started, key
             )
+        if not created:  # a concurrent identical call won the insert: this one is a replay
+            await self._audit_replay(claims, row, started)
         return Admission(tool, kind, args, started, op=row)
+
+    async def _audit_replay(self, claims: McpTokenClaims, stored: Row, started: float) -> None:
+        """A replay is answered from the stored row, but it is still a call: record who made it
+        and when. kind 'read' keeps it from counting as a write (the mutation log is the gate's
+        source of truth for writes)."""
+        op_id = uuid.uuid4()
+        await self.store.insert_audit(
+            {
+                "id": op_id,
+                "idempotency_key": f"{stored['idempotency_key']}{REPLAY_SUFFIX}{op_id}",
+                "kind": "read",
+                "tool": stored["tool"],
+                "args": stored["args"],
+                "namespace": stored["namespace"],
+                "target": stored["target"],
+                "subject": claims.sub,
+                "scopes": list(claims.scopes),
+                "thread_id": claims.thread_id,
+                "turn": claims.turn,
+                "approval_id": stored["approval_id"],
+                "status": "succeeded",
+                "error": f"replay of operation {stored['id']}",
+                "latency_ms": (time.monotonic() - started) * 1000,
+            }
+        )
 
     async def _escalation_checks(self, claims: McpTokenClaims, tool: str, args: Any) -> str | None:
         if tool == "page_oncall":
@@ -295,7 +376,13 @@ class OpsService:
         won = await self.store.claim(row["id"], task_id)
         if won is None:
             return await self._replayed(row["id"])
-        return _view(await self._perform(won, args))
+        try:
+            return _view(await self._perform(won, args))
+        except asyncio.CancelledError:
+            # A cancelled body must not leave the row `running` for a restart to find (V06-4):
+            # settle it from the end state, shielded so a second cancel cannot interrupt that.
+            await asyncio.shield(settle_row(self.store, self.backend, won, "cancelled"))
+            raise
 
     async def _replayed(self, op_id: uuid.UUID) -> dict[str, Any]:
         deadline = time.monotonic() + REPLAY_WAIT_S
@@ -358,6 +445,11 @@ class OpsService:
             result, status, error, extra = None, "failed", "internal error", None
         try:
             done = await self.store.finish(op["id"], status, result, error, extra=extra)
+        except psycopg.errors.IntegrityError:
+            # The incident's thread (or the page's incident) vanished: nothing was written.
+            reason = "the incident could not be recorded: its thread no longer exists"
+            await self.store.finish(op["id"], "failed", None, reason)
+            raise ToolError(f"failed: {reason}") from None
         except Exception:
             # The change may be in place but unrecorded (a unique/FK violation on the incident
             # row, a dropped connection). Leave the row `running`: the reconciler settles it.

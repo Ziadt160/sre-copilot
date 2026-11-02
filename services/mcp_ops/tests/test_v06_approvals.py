@@ -43,12 +43,6 @@ async def test_only_an_approved_approval_admits(
     assert sim.mutation_log() == []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-1: the refusal row copies the token's approval_id into operations.approval_id, "
-    "a foreign key to approvals; an id with no row (a deleted thread cascades its approvals) "
-    "fails the audit insert, so the call is refused as 'could not process' with no audit row",
-)
 async def test_an_approval_id_that_does_not_exist_is_refused_and_audited(
     rig: Rig, sim: SimulatorBackend
 ) -> None:
@@ -135,14 +129,18 @@ async def test_page_oncall_spelled_two_ways_pages_once(rig: Rig, sim: SimulatorB
     t = await rig.thread()
     inc = await rig.write(
         "create_incident", {"severity": "sev2", "title": "down", "summary": "crash loop"},
-        rig.token(thread_id=t),
+        rig.token(thread_id=t, tools=("create_incident", "page_oncall")),
     )  # fmt: skip
     incident_id = inc["result"]["incident_id"]
-    await rig.write("page_oncall", {"incident_id": incident_id}, rig.token(thread_id=t))
+    await rig.write(
+        "page_oncall",
+        {"incident_id": incident_id},
+        rig.token(thread_id=t, tools=("create_incident", "page_oncall")),
+    )
     again = await rig.write(
         "page_oncall",
         {"incident_id": incident_id.upper(), "rotation": "sre-primary"},
-        rig.token(thread_id=t),
+        rig.token(thread_id=t, tools=("create_incident", "page_oncall")),
     )
     assert again["replayed"] is True
     cur = await rig.db.execute("select count(*) as n from public.pages")

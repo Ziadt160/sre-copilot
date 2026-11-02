@@ -3,6 +3,7 @@ spawn subprocesses and a stdio server could not carry a bearer token anyway)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -108,9 +109,24 @@ def build_server(
 
     @asynccontextmanager
     async def lifespan(_server: FastMCP) -> AsyncIterator[None]:
-        for item in await reconcile(store, backend):
-            log.warning("reconciled operation %s -> %s", item["id"], item["status"])
-        yield
+        # Rows younger than the redelivery timeout may belong to a live instance (a rolling
+        # deploy); the periodic pass picks up whatever a crash left behind once it is old enough.
+        min_age = float(cfg.tasks["redelivery_timeout_s"])
+
+        async def sweep() -> None:
+            while True:
+                try:
+                    for item in await reconcile(store, backend, min_age_s=min_age):
+                        log.warning("reconciled operation %s -> %s", item["id"], item["status"])
+                except Exception:
+                    log.exception("reconcile pass failed")
+                await asyncio.sleep(min_age)
+
+        sweeper = asyncio.create_task(sweep())
+        try:
+            yield
+        finally:
+            sweeper.cancel()
 
     mcp = FastMCP(
         "mcp-ops",

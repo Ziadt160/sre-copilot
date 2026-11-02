@@ -108,7 +108,9 @@ async def test_a_worker_killed_after_the_change_is_settled_by_the_reconciler(
     await rig.store.claim(row["id"], "dead-task")  # claimed ... and the process dies:
     await sim.restart("shop", "web", key=row["idempotency_key"], at=row["created_at"].isoformat())
     assert await rig.rows("status = 'running'")
-    assert await reconcile(rig.store, sim) == [{"id": str(row["id"]), "status": "succeeded"}]
+    assert await reconcile(rig.store, sim, min_age_s=0) == [
+        {"id": str(row["id"]), "status": "succeeded"}
+    ]
     # The client's retry now gets the stored result, and nothing runs again.
     done = await rig.service.execute(claims, "restart_deployment", args, "retry")
     assert done["status"] == "succeeded" and done["replayed"] is True
@@ -121,7 +123,7 @@ async def test_a_worker_killed_before_the_change_ends_failed_and_never_reruns(
     claims, args = await admitted(rig)
     (row,) = await rig.rows("kind = 'write'")
     await rig.store.claim(row["id"], "dead-task")
-    await reconcile(rig.store, sim)
+    await reconcile(rig.store, sim, min_age_s=0)
     (after,) = await rig.rows("kind = 'write'")
     assert after["status"] == "failed" and "interrupted" in after["error"]
     again = await rig.service.execute(claims, "restart_deployment", args, "retry")
@@ -163,8 +165,12 @@ async def test_an_approval_that_lapses_before_execution_never_runs(
 async def test_escalation_is_idempotent_too(rig: Rig, sim: SimulatorBackend) -> None:
     t = await rig.thread()
     args = {"severity": "sev2", "title": "checkout down", "summary": "crash loop"}
-    one = await rig.write("create_incident", args, rig.token(thread_id=t))
-    two = await rig.write("create_incident", args, rig.token(thread_id=t))
+    one = await rig.write(
+        "create_incident", args, rig.token(thread_id=t, tools=("create_incident", "page_oncall"))
+    )
+    two = await rig.write(
+        "create_incident", args, rig.token(thread_id=t, tools=("create_incident", "page_oncall"))
+    )
     assert one["id"] == two["id"] and two["replayed"] is True
     cur = await rig.db.execute("select count(*) as n from public.incidents")
     assert (await cur.fetchone())["n"] == 1  # type: ignore[index]

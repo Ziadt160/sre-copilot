@@ -24,6 +24,7 @@ Row = dict[str, Any]
 # approved, has to be able to run later. The real key stays as a prefix so the audit log can
 # still be searched by it.
 REFUSED_SUFFIX = ":refused:"
+REPLAY_SUFFIX = ":replay:"
 
 
 class OpsStore:
@@ -169,17 +170,25 @@ class OpsStore:
                 update public.operations
                    set status = %s, result = %s, error = %s, finished_at = now(),
                        latency_ms = extract(epoch from (clock_timestamp() - started_at)) * 1000
-                 where id = %s and status = 'running'
+                 where id = %s and status in ('running', 'unknown')
                 returning *
                 """,
                 [status, Jsonb(result) if result is not None else None, error, op_id],
             )
             return await cur.fetchone()
 
-    async def running(self) -> list[Row]:
+    async def running(self, min_age_s: float = 0.0) -> list[Row]:
+        """`running` rows that started at least `min_age_s` ago: younger ones may belong to a
+        live instance (a rolling deploy starts the new pod while the old one finishes)."""
         async with self.tx() as conn:
             cur = await conn.execute(
-                "select * from public.operations where status = 'running' order by created_at"
+                """
+                select * from public.operations
+                 where status = 'running'
+                   and coalesce(started_at, created_at) <= now() - make_interval(secs => %s)
+                 order by created_at
+                """,
+                [min_age_s],
             )
             return await cur.fetchall()
 

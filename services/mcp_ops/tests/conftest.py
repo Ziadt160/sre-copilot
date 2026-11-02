@@ -96,6 +96,7 @@ class Rig:
         thread_id: uuid.UUID | None = None,
         turn: int | None = 1,
         approval_id: uuid.UUID | None = None,
+        tools: tuple[str, ...] | None = None,
         max_calls: int = 5,
         secret: str = SECRET,
         now: float | None = None,
@@ -104,6 +105,7 @@ class Rig:
         return ops.mint_mcp_token(
             secret=secret, sub=sub, scopes=list(scopes), namespaces=list(namespaces),  # type: ignore[arg-type]
             thread_id=thread_id, turn=turn, approval_id=approval_id, max_calls=max_calls,
+            tools=list(tools) if tools is not None else None,  # type: ignore[arg-type]
             ttl_s=ttl_s, now=now,
         )  # fmt: skip
 

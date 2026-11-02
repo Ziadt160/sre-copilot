@@ -94,13 +94,17 @@ async def test_incident_then_page_on_the_escalate_route(rig: Rig) -> None:
     inc = await rig.write(
         "create_incident",
         {"severity": "sev2", "title": "checkout down", "summary": "crash loop after 1.4.2"},
-        rig.token(thread_id=t, turn=1),
+        rig.token(thread_id=t, turn=1, tools=("create_incident", "page_oncall")),
     )
     assert (
         inc["status"] == "succeeded" and inc["kind"] == "escalation" and inc["approval_id"] is None
     )
     iid = inc["result"]["incident_id"]
-    page = await rig.write("page_oncall", {"incident_id": iid}, rig.token(thread_id=t, turn=2))
+    page = await rig.write(
+        "page_oncall",
+        {"incident_id": iid},
+        rig.token(thread_id=t, turn=2, tools=("create_incident", "page_oncall")),
+    )
     assert page["status"] == "succeeded"
     cur = await rig.db.execute(
         "select count(*) as n from public.pages where target = 'sre-primary'"
@@ -112,9 +116,14 @@ async def test_page_oncall_for_someone_elses_incident_is_refused(rig: Rig) -> No
     t = await rig.thread()
     inc = await rig.write(
         "create_incident", {"severity": "sev3", "title": "abc", "summary": "abc"},
-        rig.token(thread_id=t),
+        rig.token(thread_id=t, tools=("create_incident", "page_oncall")),
     )  # fmt: skip
-    async with rig.client(rig.token(sub="mallory", thread_id=await rig.thread("mallory"))) as c:
+    mallory = rig.token(
+        sub="mallory",
+        thread_id=await rig.thread("mallory"),
+        tools=("create_incident", "page_oncall"),
+    )
+    async with rig.client(mallory) as c:
         with pytest.raises(ToolError, match="incident not found"):
             await c.call_tool("page_oncall", {"incident_id": inc["result"]["incident_id"]})
 

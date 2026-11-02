@@ -35,29 +35,24 @@ NUL_CALLS: dict[str, tuple[str, dict[str, Any], tuple[str, ...]]] = {
 }  # fmt: skip
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-2: an argument holding a NUL makes the operations insert fail (jsonb args and "
-    "text columns reject it), the middleware turns that into 'could not process the call', and "
-    "the authenticated call leaves no audit row",
-)
 @pytest.mark.parametrize("name", list(NUL_CALLS))
 async def test_a_nul_in_an_argument_still_leaves_an_audit_row(
     rig: Rig, sim: SimulatorBackend, name: str
 ) -> None:
     tool, args, scopes = NUL_CALLS[name]
-    async with rig.client(rig.token(thread_id=await rig.thread(), scopes=scopes)) as c:
+    async with rig.client(
+        rig.token(
+            thread_id=await rig.thread(),
+            scopes=scopes,
+            tools=(tool,) if tool == "create_incident" else None,
+        )
+    ) as c:
         with pytest.raises(ToolError):
             await c.call_tool(tool, args)
     assert sim.mutation_log() == []
     assert len(await rig.rows("subject = 'alice'")) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-3: a replayed write (same key, a fresh token) is answered from the stored row and "
-    "leaves no row of its own, so the retry, its token and its time are not in the audit log",
-)
 async def test_a_replayed_write_leaves_its_own_audit_row(rig: Rig, sim: SimulatorBackend) -> None:
     t = await rig.thread()
     appr = await rig.approval(t, "restart_deployment", WEB)
@@ -91,7 +86,9 @@ async def test_a_refusal_never_blocks_the_later_approved_call(
 async def test_every_kind_of_call_leaves_a_complete_row(rig: Rig, sim: SimulatorBackend) -> None:
     t = await rig.thread()
     appr = await rig.approval(t, "restart_deployment", WEB)
-    async with rig.client(rig.token(thread_id=t, max_calls=10)) as c:
+    async with rig.client(
+        rig.token(thread_id=t, max_calls=10, tools=("list_pods", "get_logs", "create_incident"))
+    ) as c:
         await c.call_tool("list_pods", {"namespace": "shop"})  # read, succeeds
         with pytest.raises(ToolError):
             await c.call_tool("get_logs", {"namespace": "shop", "pod": "no-such-pod"})  # fails
