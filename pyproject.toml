@@ -89,7 +89,7 @@ ignore_missing_imports = true
 # --- tests -------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.3"
-testpaths = ["packages/shared/tests", "services/core/tests", "services/ingest/tests", "evals/tests"]
+testpaths = ["packages/shared/tests", "services/core/tests", "services/ingest/tests", "services/mcp_ops/tests", "evals/tests"]
 addopts = "-ra --strict-markers --import-mode=importlib"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
