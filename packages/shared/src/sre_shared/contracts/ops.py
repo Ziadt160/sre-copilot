@@ -361,6 +361,9 @@ class McpTokenClaims(BaseModel):
     thread_id: uuid.UUID | None = None
     turn: int | None = Field(default=None, ge=1)
     approval_id: uuid.UUID | None = None
+    # The tools this token may call (None: any). An escalation tool used without an approval
+    # (the escalate route) must be named here, so a token minted for a read cannot page anyone.
+    tools: list[ToolName] | None = None
     max_calls: int = Field(default=2, ge=1, le=10)
     iat: int
     exp: int
@@ -382,6 +385,7 @@ def mint_mcp_token(
     thread_id: uuid.UUID | None = None,
     turn: int | None = None,
     approval_id: uuid.UUID | None = None,
+    tools: list[ToolName] | None = None,
     max_calls: int = 2,
     ttl_s: int = 120,
     now: float | None = None,
@@ -392,7 +396,8 @@ def mint_mcp_token(
     t = int(now if now is not None else time.time())
     claims = McpTokenClaims(
         sub=sub, scopes=scopes, namespaces=namespaces, thread_id=thread_id, turn=turn,
-        approval_id=approval_id, max_calls=max_calls, iat=t, exp=t + ttl_s, jti=uuid.uuid4().hex,
+        approval_id=approval_id, tools=tools, max_calls=max_calls, iat=t, exp=t + ttl_s,
+        jti=uuid.uuid4().hex,
     )  # fmt: skip
     return jwt.encode(claims.model_dump(mode="json"), secret, algorithm="HS256")
 

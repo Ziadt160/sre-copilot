@@ -133,3 +133,16 @@ def test_sse_events_frame_by_name_and_validate() -> None:
 def test_the_web_schema_file_is_current() -> None:
     # Regenerate with: uv run python -m sre_shared.contracts.export
     assert SCHEMA_PATH.read_text(encoding="utf-8") == render()
+
+
+def test_a_token_names_the_tools_it_may_call() -> None:
+    token = ops.mint_mcp_token(
+        secret="s" * 32, sub="alice", scopes=["viewer"], namespaces=["shop"],
+        tools=["create_incident", "page_oncall"],
+    )  # fmt: skip
+    claims = ops.verify_mcp_token(token, "s" * 32)
+    assert claims.tools == ["create_incident", "page_oncall"]
+    unbound = ops.verify_mcp_token(
+        ops.mint_mcp_token(secret="s" * 32, sub="alice", scopes=["viewer"], namespaces=[]), "s" * 32
+    )
+    assert unbound.tools is None

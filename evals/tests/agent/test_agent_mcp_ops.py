@@ -45,12 +45,13 @@ class Seam:
         thread_id: uuid.UUID,
         turn: int = 1,
         approval_id: uuid.UUID | None = None,
+        tools: list[ops.ToolName],
         max_calls: int = 1,
     ) -> str:
         # The same call the agent's Ctx.mint makes (sre_core.agent.nodes.common).
         return ops.mint_mcp_token(
             secret=SECRET, sub=sub, scopes=scopes, namespaces=namespaces, thread_id=thread_id,
-            turn=turn, approval_id=approval_id, max_calls=max_calls, ttl_s=120,
+            turn=turn, approval_id=approval_id, tools=tools, max_calls=max_calls, ttl_s=120,
         )  # fmt: skip
 
     async def thread(self, owner: str = "alice") -> uuid.UUID:
@@ -95,7 +96,10 @@ async def seam(db: AsyncConnection[Any], pg_dsn: str) -> AsyncIterator[Seam]:
 
 async def test_read_returns_the_tool_output(seam: Seam) -> None:
     thread_id = await seam.thread()
-    token = seam.token(sub="alice", scopes=["viewer"], namespaces=["shop"], thread_id=thread_id)
+    token = seam.token(
+        sub="alice", scopes=["viewer"], namespaces=["shop"], thread_id=thread_id,
+        tools=["list_pods"],
+    )  # fmt: skip
     out = await seam.client.read("list_pods", {"namespace": "shop"}, token)
     assert out["trust"] == "untrusted_data"
     assert out["data"]["pods"]
@@ -106,17 +110,19 @@ async def test_approved_write_runs_once_and_polls_to_the_end(seam: Seam) -> None
     args = {"namespace": "shop", "deployment": "checkout"}
     approval_id = await seam.approval(thread_id, "restart_deployment", args)
 
-    def requester(approval: uuid.UUID | None = None) -> str:
+    def requester(tool: ops.ToolName, approval: uuid.UUID | None = None) -> str:
         # requester_token in sre_core.agent.nodes.action: one call per token (O-2)
         return seam.token(
             sub="alice", scopes=["viewer", "operator"], namespaces=["shop"],
-            thread_id=thread_id, approval_id=approval,
+            thread_id=thread_id, approval_id=approval, tools=[tool],
         )  # fmt: skip
 
-    rec = await seam.client.write("restart_deployment", args, requester(approval_id))
+    rec = await seam.client.write(
+        "restart_deployment", args, requester("restart_deployment", approval_id)
+    )
     assert rec.tool == "restart_deployment"
     assert rec.approval_id == approval_id
-    final = await seam.client.operation(rec.id, requester())
+    final = await seam.client.operation(rec.id, requester("get_operation"))
     assert final.id == rec.id
     assert final.status == "succeeded"
     assert [m["tool"] for m in seam.sim.mutation_log()] == ["restart_deployment"]
@@ -126,8 +132,9 @@ async def test_escalation_opens_an_incident_and_pages(seam: Seam) -> None:
     thread_id = await seam.thread()
     # The escalate node's token: the user's own namespaces, viewer only, two calls.
     token = seam.token(
-        sub="alice", scopes=["viewer"], namespaces=["shop"], thread_id=thread_id, max_calls=2
-    )
+        sub="alice", scopes=["viewer"], namespaces=["shop"], thread_id=thread_id,
+        tools=["create_incident", "page_oncall"], max_calls=2,
+    )  # fmt: skip
     args = ops.CreateIncidentArgs(
         severity="sev3", title="Escalated: checkout is down", summary="a person needs to look"
     ).model_dump(mode="json")

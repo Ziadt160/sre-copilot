@@ -316,9 +316,11 @@ class Ctx:
         scopes: list[Scope] | None = None,
         sub: str | None = None,
         namespaces: list[str] | None = None,
+        tools: list[ops.ToolName],
         max_calls: int = 1,
     ) -> str:
-        """A token for one or two mcp-ops calls of this turn (never the user's own token)."""
+        """A token for one or two mcp-ops calls of this turn (never the user's own token), bound
+        to the tools it is minted for so it cannot be spent on another (V06 design note)."""
         secret = self.settings.mcp_token_secret
         if secret is None:
             raise RuntimeError("mcp_token_secret is not configured")
@@ -330,6 +332,7 @@ class Ctx:
             thread_id=thread_id,
             turn=turn,
             approval_id=approval_id,
+            tools=tools,
             max_calls=max_calls,
             ttl_s=self.cfg.mcp.token_ttl_s,
         )

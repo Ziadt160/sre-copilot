@@ -177,7 +177,9 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         results = list(state["tool_results"])
         try:
             out = await ctx.ops.read(
-                call["tool"], call["args"], ctx.mint(claims, thread_id=thread_id, turn=turn)
+                call["tool"],
+                call["args"],
+                ctx.mint(claims, thread_id=thread_id, turn=turn, tools=[call["tool"]]),
             )
             results.append({"tool": call["tool"], "status": "ok", "output": out})
             return {"tool_results": results}
@@ -251,6 +253,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         thread_id: uuid.UUID,
         turn: int,
         *,
+        tool: ops.ToolName,
         approval_id: uuid.UUID | None = None,
     ) -> str:
         """The token acts as the requester (never the approver) with viewer+operator scopes and
@@ -263,6 +266,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
             approval_id=approval_id,
             scopes=["viewer", "operator"],
             namespaces=[rec.namespace] if rec.namespace else [],
+            tools=[tool],
         )
 
     async def submit_write(state: AgentState, config: RunnableConfig) -> Update:
@@ -273,7 +277,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         stored = await ctx.approvals.get(approval_id)
         if stored is None:
             return _write_failed(state, call["tool"], "approval record missing")
-        token = requester_token(stored, thread_id, turn, approval_id=approval_id)
+        token = requester_token(stored, thread_id, turn, tool=call["tool"], approval_id=approval_id)
         tool, args = call["tool"], state["exec_args"]
         try:
             submit = ctx.ops.escalate if call["kind"] == "escalation" else ctx.ops.write
@@ -322,7 +326,9 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
                     status = "unknown"
                     break
                 await asyncio.sleep(cfg.mcp.poll_interval_s)
-                token = requester_token(stored, thread_id, turn)  # one call per token
+                token = requester_token(
+                    stored, thread_id, turn, tool="get_operation"
+                )  # one call each
                 record = await ctx.ops.operation(op_id, token)
                 if record.status != status:
                     status = record.status

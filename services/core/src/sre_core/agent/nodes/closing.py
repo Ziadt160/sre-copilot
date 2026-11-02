@@ -29,7 +29,10 @@ def make_closing_nodes(ctx: Ctx) -> dict[str, Node]:
         thread_id, turn = uuid.UUID(state["thread_id"]), state["turn"]
         reason = state.get("escalate_reason") or "a person needs to look at this"
         # The token carries the minimum scope escalation needs; both calls share it.
-        token = ctx.mint(claims, thread_id=thread_id, turn=turn, scopes=["viewer"], max_calls=2)
+        token = ctx.mint(
+            claims, thread_id=thread_id, turn=turn, scopes=["viewer"],
+            tools=["create_incident", "page_oncall"], max_calls=2,
+        )  # fmt: skip
         args = ops.CreateIncidentArgs(
             severity="sev3",
             title=f"Escalated: {state['standalone']}"[:200],
