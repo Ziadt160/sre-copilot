@@ -131,7 +131,8 @@ async def _play_approval(
     sinks: list[list[dict[str, Any]]] = [[] for _ in winners]
     await asyncio.gather(
         *(
-            _collect(rig.agent.resume(claims, thread_id, w), s)
+            # resume takes the approver's claims (T12-2); the agent runs the rest as the requester
+            _collect(rig.agent.resume(decider.claims(), thread_id, w), s)
             for w, s in zip(winners, sinks, strict=True)
         )
     )

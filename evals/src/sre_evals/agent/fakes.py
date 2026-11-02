@@ -277,7 +277,14 @@ class OracleAgent:
             yield ev.DoneEvent(thread_id=thread_id, turn=approval.turn, route="action",
                                answer=f"Not run: the approval was {approval.status}.")  # fmt: skip
             return
-        token = self._token(claims, thread_id, approval.turn, approval.id)
+        if approval.required_scope not in claims.scopes:
+            # As the real agent does: `claims` are the approver's (T12-2), checked again here.
+            await self.threads.set_status(thread_id, "active")
+            yield ev.DoneEvent(thread_id=thread_id, turn=approval.turn, route="action",
+                               answer=f"Not run: the {approval.required_scope} scope is needed.")  # fmt: skip
+            return
+        # The write runs as the requester, never the approver (ruling O-2).
+        token = self._token(self.item.caller.claims(), thread_id, approval.turn, approval.id)
         send = (
             self.ops_client.escalate
             if ops.tool_kind(approval.tool) == "escalation"
