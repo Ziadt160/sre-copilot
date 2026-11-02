@@ -162,6 +162,41 @@ async def test_an_approval_that_lapses_before_execution_never_runs(
     assert retry["status"] == "succeeded" and len(sim.mutation_log()) == 1
 
 
+async def test_a_single_use_write_token_resent_gets_the_stored_operation(
+    rig: Rig, sim: SimulatorBackend
+) -> None:
+    t, appr = await approved(rig)
+    tok = rig.token(thread_id=t, approval_id=appr, max_calls=1, tools=("restart_deployment",))
+    first = await rig.write("restart_deployment", WEB, tok)
+    again = await rig.write("restart_deployment", WEB, tok)  # the reply was lost; same token
+    assert again["id"] == first["id"] and again["replayed"] is True
+    assert again["status"] == "succeeded" and len(sim.mutation_log()) == 1
+    # A NEW write on the used-up token is still refused.
+    other = {"namespace": "shop", "deployment": "cart"}
+    appr2 = await rig.approval(t, "restart_deployment", other)
+    tok2 = rig.token(thread_id=t, approval_id=appr2, max_calls=1, tools=("restart_deployment",))
+    await rig.write("restart_deployment", other, tok2)
+    third = {"namespace": "staging", "deployment": "search"}
+    async with rig.client(tok2) as c:
+        with pytest.raises(ToolError, match="max_calls"):
+            await c.call_tool("restart_deployment", third)
+    assert len(sim.mutation_log()) == 2
+
+
+async def test_an_escalation_token_survives_a_resent_incident_and_still_pages(
+    rig: Rig, sim: SimulatorBackend
+) -> None:
+    t = await rig.thread()
+    tok = rig.token(thread_id=t, max_calls=2, tools=("create_incident", "page_oncall"))
+    args = {"severity": "sev2", "title": "checkout down", "summary": "crash loop"}
+    one = await rig.write("create_incident", args, tok)
+    two = await rig.write("create_incident", args, tok)  # resent: free
+    assert two["id"] == one["id"] and two["replayed"] is True
+    paged = await rig.write("page_oncall", {"incident_id": one["result"]["incident_id"]}, tok)
+    assert paged["status"] == "succeeded"
+    assert [e["tool"] for e in sim.mutation_log()] == ["create_incident", "page_oncall"]
+
+
 async def test_escalation_is_idempotent_too(rig: Rig, sim: SimulatorBackend) -> None:
     t = await rig.thread()
     args = {"severity": "sev2", "title": "checkout down", "summary": "crash loop"}
