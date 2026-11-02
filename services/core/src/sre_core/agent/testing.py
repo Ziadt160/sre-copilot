@@ -261,8 +261,12 @@ class FakeBudgetGuard:
         ):
             raise BudgetExceeded(f"{claims.sub}: daily token budget reached")
 
-    async def record(self, claims: Claims, tokens: int) -> None:
-        self.used[claims.sub] = self.used.get(claims.sub, 0) + tokens
+    async def reserve(self, claims: Claims, planned_tokens: int) -> None:
+        await self.check(claims, planned_tokens)  # no await between check and hold: atomic here
+        self.used[claims.sub] = self.used.get(claims.sub, 0) + planned_tokens
+
+    async def record(self, claims: Claims, tokens: int, *, reserved: int = 0) -> None:
+        self.used[claims.sub] = self.used.get(claims.sub, 0) + tokens - reserved
 
 
 @dataclass

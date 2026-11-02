@@ -185,10 +185,20 @@ class AnswerCache(Protocol):
 @runtime_checkable
 class BudgetGuard(Protocol):
     async def check(self, claims: Claims, planned_tokens: int) -> None:
-        """Raise BudgetExceeded if `planned_tokens` would pass the caller's daily allowance."""
+        """Raise BudgetExceeded if `planned_tokens` would pass the caller's daily allowance.
+        A pre-check only: it holds nothing (the API's 429 before a turn starts)."""
         ...
 
-    async def record(self, claims: Claims, tokens: int) -> None: ...
+    async def reserve(self, claims: Claims, planned_tokens: int) -> None:
+        """Hold `planned_tokens` against the allowance atomically, or raise BudgetExceeded, so
+        parallel calls cannot all pass one check (V07-6). The matching `record` passes
+        `reserved=planned_tokens`; a call that fails before `record` keeps its hold for the day
+        (counted, never under-counted)."""
+        ...
+
+    async def record(self, claims: Claims, tokens: int, *, reserved: int = 0) -> None:
+        """Count `tokens` used, releasing a hold of `reserved` taken by `reserve`."""
+        ...
 
 
 @runtime_checkable

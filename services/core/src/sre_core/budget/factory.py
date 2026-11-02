@@ -2,10 +2,10 @@
 
 Counted in Redis per user per UTC day so every API process shares it; a day is a calendar day
 here (unlike the provider quota ledger, which is a rolling 24 h) because the allowance is our
-own fairness rule, not a provider's limit. `check` runs before a model call with the tokens it
-plans to spend, `record` after it with the tokens it used. The two are not one atomic step, so
-parallel requests from one user can overshoot by about one request; the provider quota guard
-behind it is the hard stop. An allowance of 0 refuses every call.
+own fairness rule, not a provider's limit. `reserve` holds a model call's planned tokens before
+it runs (INCRBY, then give them back if that passed the allowance), and `record` swaps the hold
+for the tokens really used, so parallel turns cannot all pass one check (V07-6). `check` is the
+non-binding pre-check the API runs before a turn. An allowance of 0 refuses every call.
 """
 
 from __future__ import annotations
@@ -56,11 +56,24 @@ class RedisBudgetGuard:
                 f"{planned_tokens} planned); it resets at 00:00 UTC"
             )
 
-    async def record(self, claims: Claims, tokens: int) -> None:
-        if tokens <= 0:
+    async def reserve(self, claims: Claims, planned_tokens: int) -> None:
+        planned = max(int(planned_tokens), 0)
+        key = self._key(claims)
+        total = int(await self._redis.incrby(key, planned))
+        await self._redis.expire(key, KEY_TTL_S)
+        if total > self._daily:
+            await self._redis.decrby(key, planned)
+            raise BudgetExceeded(
+                f"daily token allowance reached ({total - planned} of {self._daily} used, "
+                f"{planned} planned); it resets at 00:00 UTC"
+            )
+
+    async def record(self, claims: Claims, tokens: int, *, reserved: int = 0) -> None:
+        delta = max(int(tokens), 0) - max(int(reserved), 0)
+        if delta == 0:
             return
         key = self._key(claims)
-        await self._redis.incrby(key, int(tokens))
+        await self._redis.incrby(key, delta)
         await self._redis.expire(key, KEY_TTL_S)
 
 

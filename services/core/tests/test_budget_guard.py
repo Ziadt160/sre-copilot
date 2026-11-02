@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import fakeredis
@@ -90,3 +91,27 @@ async def test_factory_uses_configured_allowance_and_requires_redis() -> None:
         await g.check(ALICE, 20001)
     with pytest.raises(RuntimeError, match="REDIS_URL"):
         make_budget_guard(Settings(_env_file=None, redis_url=None))
+
+
+async def test_parallel_reservations_never_pass_the_allowance_together() -> None:
+    g = guard(1000)
+
+    async def one() -> bool:
+        try:
+            await g.reserve(ALICE, 300)
+        except BudgetExceeded:
+            return False
+        return True
+
+    granted = sum(await asyncio.gather(*(one() for _ in range(10))))
+    assert granted == 3 and await g.used(ALICE) == 900
+
+
+async def test_record_swaps_the_hold_for_the_tokens_used() -> None:
+    g = guard(1000)
+    await g.reserve(ALICE, 500)
+    await g.record(ALICE, 120, reserved=500)
+    assert await g.used(ALICE) == 120
+    await g.reserve(ALICE, 880)  # the released hold is spendable again
+    with pytest.raises(BudgetExceeded):
+        await g.reserve(ALICE, 1)
