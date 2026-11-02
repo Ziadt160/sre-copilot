@@ -236,7 +236,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         return {}
 
     async def apply_decision(state: AgentState, config: RunnableConfig) -> Update:
-        claims = ctx.claims(config)
+        claims = ctx.approver(config)  # the approval check uses the approver, nothing else
         thread_id, _ = _ids(state)
         pending = state["pending_approval_id"]
         rec = await ctx.approvals.get(uuid.UUID(pending)) if pending else None
@@ -244,7 +244,16 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         await ctx.threads.set_status(thread_id, "active")
         if refusal is not None or rec is None:
             return _final(refusal or "Not run.", exec_args=None, exec_approval_id=None)
-        return {"exec_args": dict(rec.args), "exec_approval_id": str(rec.id)}
+        # One atomic claim per approval: a second resume, or an approval that has expired since
+        # it was decided, gets None and submits nothing.
+        claimed = await ctx.approvals.claim_execution(rec.id)
+        if claimed is None:
+            return _final(
+                "Not run: the approval was already used or has expired.",
+                exec_args=None,
+                exec_approval_id=None,
+            )
+        return {"exec_args": dict(claimed.args), "exec_approval_id": str(claimed.id)}
 
     # -- running an approved write ---------------------------------------------------------
 
@@ -285,7 +294,8 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         except Exception as exc:
             log.warning("submitting %s failed: %s", tool, type(exc).__name__)
             return _write_failed(state, tool, f"{type(exc).__name__}")
-        await ctx.approvals.mark_executed(approval_id)
+        if rec.status != "refused":  # a refused operation never ran: leave the approval as is
+            await ctx.approvals.mark_executed(approval_id)
         ctx.emit(OperationEvent(operation_id=rec.id, tool=tool, status=rec.status))
         return {"operation_id": str(rec.id), "operation_status": rec.status}
 
