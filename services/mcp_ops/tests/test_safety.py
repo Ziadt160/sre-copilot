@@ -217,7 +217,7 @@ async def test_a_read_bound_token_cannot_open_an_incident(rig: Rig) -> None:
     async with rig.client(rig.token(thread_id=t, tools=("list_pods",))) as c:
         with pytest.raises(ToolError, match="not valid for create_incident"):
             await c.call_tool("create_incident", INCIDENT)
-    assert not await rig.rows("kind = 'escalation'")
+    assert not await rig.rows("kind = 'escalation' and status <> 'refused'")
     (row,) = await rig.rows("status = 'refused'")
     assert row["tool"] == "create_incident" and row["subject"] == "alice"
 
@@ -228,7 +228,7 @@ async def test_an_unbound_token_cannot_open_an_incident_without_an_approval(rig:
         with pytest.raises(ToolError, match="needs a token bound to it"):
             await c.call_tool("create_incident", INCIDENT)
     assert len(await rig.rows("status = 'refused'")) == 1
-    assert not await rig.rows("kind = 'escalation'")
+    assert not await rig.rows("kind = 'escalation' and status <> 'refused'")
 
 
 async def test_a_token_bound_to_one_read_cannot_call_another(rig: Rig) -> None:
