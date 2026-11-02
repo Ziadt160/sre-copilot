@@ -31,8 +31,12 @@ def _record(row: Mapping[str, Any]) -> ops.ApprovalRecord:
 
 
 class PgApprovalStore:
-    def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
+    def __init__(
+        self, pool: AsyncConnectionPool[Any], policy: ops.NamespacePolicy | None = None
+    ) -> None:
         self.pool = pool
+        # Needed to re-rate an edited call (risk, required level); set by the runtime.
+        self.policy = policy
 
     async def create(self, approval: ops.ApprovalRecord) -> ops.ApprovalRecord:
         async with self.pool.connection() as conn:
@@ -69,8 +73,9 @@ class PgApprovalStore:
         args: Mapping[str, Any] | None = None,
     ) -> ops.ApprovalRecord | None:
         """The decided record, or None when it was not pending or has expired. Edited args are
-        re-validated and stored with their hash, namespace and target (the audit row must
-        describe what will run)."""
+        re-validated and stored with their hash, namespace, target, risk and effect, and the
+        required level becomes the higher of the old and the new (the row must describe what
+        will run)."""
         sets = ["status = %s", "decided_by = %s", "decided_at = now()"]
         params: list[Any] = [decision, decided_by]
         if args is not None:
@@ -79,12 +84,22 @@ class PgApprovalStore:
                 return None
             norm = ops.normalize_args(current.tool, args)
             ns, target = ops.target_of(current.tool, ops.parse_args(current.tool, norm))
-            sets += ["args = %s", "args_hash = %s", "namespace = %s", "target = %s"]
+            parsed = ops.parse_args(current.tool, norm)
+            policy = self.policy or ops.NamespacePolicy(allowed=frozenset())
+            level = ops.required_approval(current.tool, parsed, policy, route="action")
+            scope = "admin" if "admin" in (level, current.required_scope) else "operator"
+            sets += [
+                "args = %s", "args_hash = %s", "namespace = %s", "target = %s",
+                "risk = %s", "expected_effect = %s", "required_scope = %s",
+            ]  # fmt: skip
             params += [
                 Jsonb(norm),
                 ops.args_hash(current.tool, norm),
                 ns or current.namespace,
                 target or current.target,
+                ops.risk_of(current.tool, parsed, policy),
+                ops.expected_effect(current.tool, parsed),
+                scope,
             ]
         params.append(approval_id)
         async with self.pool.connection() as conn:

@@ -390,7 +390,9 @@ async def decide_approval(
 
     new_args: dict[str, Any] | None = None
     if body.decision == "edit":
-        new_args = _checked_edit(rt, rec, body.args, is_admin)
+        new_args = _checked_edit(rt, rec, body.args, claims)
+        if isinstance(rt.approvals, PgApprovalStore) and rt.approvals.policy is None:
+            rt.approvals.policy = rt.policy
     elif body.args is not None:
         raise HTTPException(status_code=422, detail="args are accepted only with decision=edit")
 
@@ -414,7 +416,7 @@ async def decide_approval(
 
 
 def _checked_edit(
-    rt: Runtime, rec: ops.ApprovalRecord, args: dict[str, Any] | None, is_admin: bool
+    rt: Runtime, rec: ops.ApprovalRecord, args: dict[str, Any] | None, claims: Claims
 ) -> dict[str, Any]:
     """Validate edited arguments like a new proposal: the schema, the namespace allow-list, and
     the approval level they now need (a higher level than the record's needs an admin)."""
@@ -429,7 +431,9 @@ def _checked_edit(
     if ns is not None and ns not in rt.policy.allowed:
         raise HTTPException(status_code=403, detail=f"namespace {ns} is not allowed")
     need = ops.required_approval(rec.tool, parsed, rt.policy, route="action")
-    if _RANK[need] > _RANK[rec.required_scope] and not is_admin:
+    if refusal := ops.allowed(rec.tool, parsed, [*claims.scopes], claims.namespaces, rt.policy):
+        raise HTTPException(status_code=403, detail=refusal)
+    if _RANK[need] > _RANK[rec.required_scope] and "admin" not in claims.scopes:
         raise HTTPException(status_code=403, detail="the edited call needs an admin's approval")
     return ops.normalize_args(rec.tool, args)
 
