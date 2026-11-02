@@ -143,6 +143,13 @@ containers = []
 exhaustive = false
 
 [[tool.importlinter.contracts]]
+name = "ports sit below every core layer: they import only sre_shared"
+type = "forbidden"
+source_modules = ["sre_core.ports"]
+forbidden_modules = ["sre_core.api", "sre_core.agent", "sre_core.answer", "sre_core.store",
+                     "sre_core.cache", "sre_core.budget", "sre_core.review", "sre_core.retrieval"]
+
+[[tool.importlinter.contracts]]
 name = "the agent reaches threads, approvals and the outbox only through its ports"
 type = "forbidden"
 source_modules = ["sre_core.agent"]

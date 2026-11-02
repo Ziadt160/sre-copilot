@@ -12,7 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from sre_core.agent.ports import (
+from sre_core.ports import (
     AnswerCache,
     ApprovalStore,
     BudgetGuard,

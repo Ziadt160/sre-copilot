@@ -17,6 +17,7 @@ import json
 import os
 import tempfile
 import time
+import uuid
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -74,7 +75,12 @@ def parse_model_spec(
     secret = getattr(settings, key_attr, None)
     key = secret.get_secret_value() if secret is not None else None
     assert prov.base_url is not None
-    return ModelSpec(provider, model, prov.base_url, key)
+    base_url = prov.base_url
+    # Workers AI puts the account id in the path. Substituted only when it is set, so an
+    # unconfigured provider keeps the `{...}` marker and callers can tell it is unusable.
+    if "{cloudflare_account_id}" in base_url and settings.cloudflare_account_id:
+        base_url = base_url.replace("{cloudflare_account_id}", settings.cloudflare_account_id)
+    return ModelSpec(provider, model, base_url, key)
 
 
 class UnknownModelError(ValueError):
@@ -168,6 +174,41 @@ class FileLedger:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             json.dump(data, f, indent=1, sort_keys=True)
         os.replace(tmp, self.path)
+
+
+class RedisLedger:
+    """The rolling-24 h ledger in Redis, so every API process shares one count (the file ledger
+    is for lab scripts on one machine). One sorted set per model label, scored by time; each
+    member carries its token count and a random suffix, so two calls in the same instant stay
+    two members. `redis` is a synchronous client: the TokenLedger protocol is synchronous, and a
+    sorted-set read is one round trip."""
+
+    def __init__(self, redis: Any, clock: Any = time.time, prefix: str = "sre:ledger:") -> None:
+        self._redis = redis
+        self._clock = clock
+        self._prefix = prefix
+
+    @classmethod
+    def from_url(cls, url: str, **kw: Any) -> RedisLedger:
+        import redis
+
+        return cls(redis.Redis.from_url(url), **kw)
+
+    def used(self, label: str) -> int:
+        key = self._prefix + label
+        now = self._clock()
+        self._redis.zremrangebyscore(key, "-inf", now - WINDOW_S)
+        total = 0
+        for member in self._redis.zrange(key, 0, -1):
+            text = member.decode() if isinstance(member, bytes) else str(member)
+            total += int(text.split(":", 1)[0])
+        return total
+
+    def add(self, label: str, tokens: int) -> None:
+        key = self._prefix + label
+        now = self._clock()
+        self._redis.zadd(key, {f"{int(tokens)}:{uuid.uuid4().hex}": now})
+        self._redis.expire(key, WINDOW_S + 3600)  # idle models do not leave keys behind
 
 
 def today() -> str:
