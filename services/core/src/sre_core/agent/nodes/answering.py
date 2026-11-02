@@ -9,7 +9,7 @@ from collections.abc import Sequence
 import openai
 from langchain_core.runnables import RunnableConfig
 
-from sre_core.agent.fallback import AllProvidersFailed, extractive_answer
+from sre_core.agent.models import AllProvidersFailed, extractive_answer
 from sre_core.agent.nodes.common import Ctx, Meter, Node, ParseFailure, Update
 from sre_core.agent.ports import CachedAnswer
 from sre_core.agent.prompts import AGENT_PROMPT_VERSION, decompose_messages, synthesize_messages

@@ -7,7 +7,7 @@ import uuid
 
 from langchain_core.runnables import RunnableConfig
 
-from sre_core.agent.fallback import AllProvidersFailed
+from sre_core.agent.models import AllProvidersFailed
 from sre_core.agent.nodes.common import Ctx, Meter, Node, ParseFailure, Update
 from sre_core.agent.prompts import (
     AGENT_PROMPT_VERSION,

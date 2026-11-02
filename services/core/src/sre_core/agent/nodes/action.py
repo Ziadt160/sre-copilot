@@ -22,7 +22,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 from pydantic import ValidationError
 
-from sre_core.agent.fallback import AllProvidersFailed
+from sre_core.agent.models import AllProvidersFailed
 from sre_core.agent.nodes.common import (
     Ctx,
     LimitReached,
@@ -246,13 +246,34 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
 
     # -- running an approved write ---------------------------------------------------------
 
+    def requester_token(
+        rec: ops.ApprovalRecord,
+        thread_id: uuid.UUID,
+        turn: int,
+        *,
+        approval_id: uuid.UUID | None = None,
+    ) -> str:
+        """The token acts as the requester (never the approver) with viewer+operator scopes and
+        the approval's namespace; admin is never put in a token (mcp-ops checks admin
+        requirements against the approval record)."""
+        return ctx.mint(
+            ctx.claims_of_requester(rec.requested_by),
+            thread_id=thread_id,
+            turn=turn,
+            approval_id=approval_id,
+            scopes=["viewer", "operator"],
+            namespaces=[rec.namespace] if rec.namespace else [],
+        )
+
     async def submit_write(state: AgentState, config: RunnableConfig) -> Update:
-        claims = ctx.claims(config)
         thread_id, turn = _ids(state)
         call = state["current"]
         assert call is not None and state["exec_args"] is not None
         approval_id = uuid.UUID(str(state["exec_approval_id"]))
-        token = ctx.mint(claims, thread_id=thread_id, turn=turn, approval_id=approval_id)
+        stored = await ctx.approvals.get(approval_id)
+        if stored is None:
+            return _write_failed(state, call["tool"], "approval record missing")
+        token = requester_token(stored, thread_id, turn, approval_id=approval_id)
         tool, args = call["tool"], state["exec_args"]
         try:
             submit = ctx.ops.escalate if call["kind"] == "escalation" else ctx.ops.write
@@ -282,13 +303,15 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
 
     async def poll_write(state: AgentState, config: RunnableConfig) -> Update:
         """Poll the operation (Postgres, through get_operation) until it ends or times out."""
-        claims = ctx.claims(config)
         thread_id, turn = _ids(state)
         call = state["current"]
         assert call is not None
         tool = call["tool"]
         if state["operation_id"] is None:  # submission failed: nothing to poll
             return {}
+        stored = await ctx.approvals.get(uuid.UUID(str(state["exec_approval_id"])))
+        if stored is None:
+            return {"operation_status": "unknown"}
         op_id = uuid.UUID(state["operation_id"])
         status = state["operation_status"] or "running"
         record: ops.OperationRecord | None = None
@@ -299,7 +322,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
                     status = "unknown"
                     break
                 await asyncio.sleep(cfg.mcp.poll_interval_s)
-                token = ctx.mint(claims, thread_id=thread_id, turn=turn)  # one call per token
+                token = requester_token(stored, thread_id, turn)  # one call per token
                 record = await ctx.ops.operation(op_id, token)
                 if record.status != status:
                     status = record.status

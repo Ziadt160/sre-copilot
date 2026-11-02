@@ -299,6 +299,11 @@ class Ctx:
         self.corpus_version_id = res.corpus_version_id
         return res
 
+    @staticmethod
+    def claims_of_requester(sub: str) -> Claims:
+        """Only the subject matters: `mint` is given explicit scopes and namespaces."""
+        return Claims(sub=sub)
+
     # -- mcp-ops tokens ------------------------------------------------------------------
 
     def mint(
@@ -309,6 +314,8 @@ class Ctx:
         turn: int,
         approval_id: uuid.UUID | None = None,
         scopes: list[Scope] | None = None,
+        sub: str | None = None,
+        namespaces: list[str] | None = None,
         max_calls: int = 1,
     ) -> str:
         """A token for one or two mcp-ops calls of this turn (never the user's own token)."""
@@ -317,9 +324,9 @@ class Ctx:
             raise RuntimeError("mcp_token_secret is not configured")
         return ops.mint_mcp_token(
             secret=secret.get_secret_value(),
-            sub=claims.sub,
+            sub=sub or claims.sub,
             scopes=list(claims.scopes) if scopes is None else scopes,
-            namespaces=list(claims.namespaces),
+            namespaces=list(claims.namespaces) if namespaces is None else namespaces,
             thread_id=thread_id,
             turn=turn,
             approval_id=approval_id,
