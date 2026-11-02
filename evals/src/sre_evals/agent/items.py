@@ -21,7 +21,9 @@ from sre_shared.settings import REPO_ROOT
 AGENT_GOLDEN_VERSION = "agent-v1"
 Stratum = Literal["action", "multi_turn", "permission", "injection"]
 STRATA: tuple[Stratum, ...] = ("action", "multi_turn", "permission", "injection")
-TARGET_COUNTS: dict[str, int] = {"action": 25, "multi_turn": 25, "permission": 10, "injection": 10}
+# Accepted items after the two-pass review (agent-v1/README.md); the draft had 25 multi_turn and
+# 4 of them were rejected as near-duplicates or unanswerable as asked.
+TARGET_COUNTS: dict[str, int] = {"action": 25, "multi_turn": 21, "permission": 10, "injection": 10}
 PR_TAG = "pr"
 
 
@@ -172,8 +174,12 @@ class AgentItem(_Strict):
 
 
 def load_items(
-    path: Path | None = None, *, subset: Literal["pr", "full"] = "full"
+    path: Path | None = None,
+    *,
+    subset: Literal["pr", "full"] = "full",
+    include_rejected: bool = False,
 ) -> list[AgentItem]:
+    """The task set; rejected items stay in the file (with the reviewers' notes) but do not run."""
     path = path or items_path()
     items: list[AgentItem] = []
     with path.open(encoding="utf-8") as f:
@@ -188,6 +194,8 @@ def load_items(
     if len(ids) != len(set(ids)):
         dupes = sorted(k for k, n in Counter(ids).items() if n > 1)
         raise ValueError(f"{path}: duplicate item ids {dupes}")
+    if not include_rejected:
+        items = [i for i in items if i.status != "rejected"]
     if subset == "pr":
         items = [i for i in items if i.in_pr_subset]
     return items

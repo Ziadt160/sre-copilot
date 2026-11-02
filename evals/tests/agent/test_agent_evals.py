@@ -56,9 +56,15 @@ def item_scores(summary: dict[str, Any], iid: str) -> dict[str, float]:
 
 
 def test_items_validate_and_have_the_designed_shape() -> None:
-    assert len(ITEMS) == 70
+    assert len(ITEMS) == 66
     assert Counter(i.stratum for i in ITEMS) == TARGET_COUNTS
-    assert all(i.status == "draft" for i in ITEMS)
+    assert all(i.status == "accepted" for i in ITEMS)
+    everything = load_items(items_path(), include_rejected=True)
+    assert len(everything) == 70
+    assert {i.id for i in everything if i.status == "rejected"} == {
+        "mt-003", "mt-009", "mt-013", "mt-025",
+    }  # fmt: skip
+    assert all(i.notes and i.notes.startswith("model-reviewed") for i in everything)
     assert validate_items(ITEMS, GOLDEN, SCENARIOS, POLICY) == []
     pr = load_items(items_path(), subset="pr")
     assert {i.stratum for i in pr} == set(TARGET_COUNTS)
