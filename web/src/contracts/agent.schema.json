@@ -1,0 +1,722 @@
+{
+  "AgentEvent": {
+    "$defs": {
+      "AbstainEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "abstain",
+            "default": "abstain",
+            "title": "Event",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/Citation"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "AbstainEvent",
+        "type": "object"
+      },
+      "ApprovalRequiredEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "approval_id": {
+            "format": "uuid",
+            "title": "Approval Id",
+            "type": "string"
+          },
+          "args": {
+            "additionalProperties": true,
+            "title": "Args",
+            "type": "object"
+          },
+          "event": {
+            "const": "approval_required",
+            "default": "approval_required",
+            "title": "Event",
+            "type": "string"
+          },
+          "expected_effect": {
+            "title": "Expected Effect",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "namespace": {
+            "title": "Namespace",
+            "type": "string"
+          },
+          "required_scope": {
+            "enum": [
+              "operator",
+              "admin"
+            ],
+            "title": "Required Scope",
+            "type": "string"
+          },
+          "risk": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "title": "Risk",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "approval_id",
+          "tool",
+          "args",
+          "namespace",
+          "target",
+          "risk",
+          "required_scope",
+          "expected_effect",
+          "expires_at"
+        ],
+        "title": "ApprovalRequiredEvent",
+        "type": "object"
+      },
+      "CacheHitEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "cache": {
+            "enum": [
+              "exact",
+              "semantic"
+            ],
+            "title": "Cache",
+            "type": "string"
+          },
+          "event": {
+            "const": "cache_hit",
+            "default": "cache_hit",
+            "title": "Event",
+            "type": "string"
+          }
+        },
+        "required": [
+          "cache"
+        ],
+        "title": "CacheHitEvent",
+        "type": "object"
+      },
+      "Citation": {
+        "description": "A source the answer cites: one of the chunks given to the model, by id.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "integer"
+          },
+          "k8s_version": {
+            "title": "K8S Version",
+            "type": "string"
+          },
+          "source_path": {
+            "title": "Source Path",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "source_path",
+          "k8s_version",
+          "url",
+          "title"
+        ],
+        "title": "Citation",
+        "type": "object"
+      },
+      "DoneEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "title": "Answer",
+            "type": "string"
+          },
+          "citations": {
+            "items": {
+              "$ref": "#/$defs/Citation"
+            },
+            "title": "Citations",
+            "type": "array"
+          },
+          "completion_tokens": {
+            "default": 0,
+            "title": "Completion Tokens",
+            "type": "integer"
+          },
+          "event": {
+            "const": "done",
+            "default": "done",
+            "title": "Event",
+            "type": "string"
+          },
+          "prompt_tokens": {
+            "default": 0,
+            "title": "Prompt Tokens",
+            "type": "integer"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "enum": [
+                  "simple",
+                  "complex",
+                  "action",
+                  "escalate"
+                ],
+                "type": "string"
+              },
+              {
+                "const": "cache",
+                "type": "string"
+              }
+            ],
+            "title": "Route"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "turn": {
+            "title": "Turn",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "thread_id",
+          "turn",
+          "route",
+          "answer"
+        ],
+        "title": "DoneEvent",
+        "type": "object"
+      },
+      "ErrorEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "event": {
+            "const": "error",
+            "default": "error",
+            "title": "Event",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "detail"
+        ],
+        "title": "ErrorEvent",
+        "type": "object"
+      },
+      "EscalatedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "escalated",
+            "default": "escalated",
+            "title": "Event",
+            "type": "string"
+          },
+          "incident_id": {
+            "format": "uuid",
+            "title": "Incident Id",
+            "type": "string"
+          },
+          "paged": {
+            "title": "Paged",
+            "type": "boolean"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "incident_id",
+          "paged",
+          "reason"
+        ],
+        "title": "EscalatedEvent",
+        "type": "object"
+      },
+      "OperationEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "operation",
+            "default": "operation",
+            "title": "Event",
+            "type": "string"
+          },
+          "operation_id": {
+            "format": "uuid",
+            "title": "Operation Id",
+            "type": "string"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Progress"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Result"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "running",
+              "succeeded",
+              "failed",
+              "unknown",
+              "refused"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "operation_id",
+          "tool",
+          "status"
+        ],
+        "title": "OperationEvent",
+        "type": "object"
+      },
+      "RouteEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "route",
+            "default": "route",
+            "title": "Event",
+            "type": "string"
+          },
+          "route": {
+            "enum": [
+              "simple",
+              "complex",
+              "action",
+              "escalate"
+            ],
+            "title": "Route",
+            "type": "string"
+          },
+          "standalone_question": {
+            "description": "the follow-up rewritten as a standalone question",
+            "title": "Standalone Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "route",
+          "standalone_question"
+        ],
+        "title": "RouteEvent",
+        "type": "object"
+      },
+      "SourcesEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "sources",
+            "default": "sources",
+            "title": "Event",
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/$defs/Citation"
+            },
+            "title": "Sources",
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources"
+        ],
+        "title": "SourcesEvent",
+        "type": "object"
+      },
+      "TokenEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "token",
+            "default": "token",
+            "title": "Event",
+            "type": "string"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "title": "TokenEvent",
+        "type": "object"
+      },
+      "ToolProposedEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "additionalProperties": true,
+            "title": "Args",
+            "type": "object"
+          },
+          "event": {
+            "const": "tool_proposed",
+            "default": "tool_proposed",
+            "title": "Event",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "read",
+              "write",
+              "escalation"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "tool": {
+            "title": "Tool",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tool",
+          "args",
+          "kind"
+        ],
+        "title": "ToolProposedEvent",
+        "type": "object"
+      },
+      "TurnEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "const": "turn",
+            "default": "turn",
+            "title": "Event",
+            "type": "string"
+          },
+          "thread_id": {
+            "format": "uuid",
+            "title": "Thread Id",
+            "type": "string"
+          },
+          "turn": {
+            "title": "Turn",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "thread_id",
+          "turn"
+        ],
+        "title": "TurnEvent",
+        "type": "object"
+      }
+    },
+    "discriminator": {
+      "mapping": {
+        "abstain": "#/$defs/AbstainEvent",
+        "approval_required": "#/$defs/ApprovalRequiredEvent",
+        "cache_hit": "#/$defs/CacheHitEvent",
+        "done": "#/$defs/DoneEvent",
+        "error": "#/$defs/ErrorEvent",
+        "escalated": "#/$defs/EscalatedEvent",
+        "operation": "#/$defs/OperationEvent",
+        "route": "#/$defs/RouteEvent",
+        "sources": "#/$defs/SourcesEvent",
+        "token": "#/$defs/TokenEvent",
+        "tool_proposed": "#/$defs/ToolProposedEvent",
+        "turn": "#/$defs/TurnEvent"
+      },
+      "propertyName": "event"
+    },
+    "oneOf": [
+      {
+        "$ref": "#/$defs/TurnEvent"
+      },
+      {
+        "$ref": "#/$defs/RouteEvent"
+      },
+      {
+        "$ref": "#/$defs/CacheHitEvent"
+      },
+      {
+        "$ref": "#/$defs/SourcesEvent"
+      },
+      {
+        "$ref": "#/$defs/TokenEvent"
+      },
+      {
+        "$ref": "#/$defs/ToolProposedEvent"
+      },
+      {
+        "$ref": "#/$defs/ApprovalRequiredEvent"
+      },
+      {
+        "$ref": "#/$defs/OperationEvent"
+      },
+      {
+        "$ref": "#/$defs/EscalatedEvent"
+      },
+      {
+        "$ref": "#/$defs/AbstainEvent"
+      },
+      {
+        "$ref": "#/$defs/DoneEvent"
+      },
+      {
+        "$ref": "#/$defs/ErrorEvent"
+      }
+    ]
+  },
+  "ApprovalDecision": {
+    "additionalProperties": false,
+    "description": "`POST /approvals/{id}`. `edit` approves with changed arguments, which are validated and\nre-checked against the approval rules like a new proposal.",
+    "properties": {
+      "args": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Args"
+      },
+      "decision": {
+        "enum": [
+          "approve",
+          "edit",
+          "reject"
+        ],
+        "title": "Decision",
+        "type": "string"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reason"
+      }
+    },
+    "required": [
+      "decision"
+    ],
+    "title": "ApprovalDecision",
+    "type": "object"
+  },
+  "ChatRequest": {
+    "additionalProperties": false,
+    "description": "One user message. No `thread_id` starts a new thread. `client_message_id` lets the UI\nretry a send without creating a second turn.",
+    "properties": {
+      "client_message_id": {
+        "anyOf": [
+          {
+            "maxLength": 100,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Client Message Id"
+      },
+      "message": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Message",
+        "type": "string"
+      },
+      "thread_id": {
+        "anyOf": [
+          {
+            "format": "uuid",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Thread Id"
+      }
+    },
+    "required": [
+      "message"
+    ],
+    "title": "ChatRequest",
+    "type": "object"
+  },
+  "FeedbackRequest": {
+    "additionalProperties": false,
+    "description": "`POST /feedback`: thumbs on a turn, optionally per cited chunk.",
+    "properties": {
+      "rating": {
+        "anyOf": [
+          {
+            "enum": [
+              -1,
+              1
+            ],
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Rating"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reason"
+      },
+      "sources": {
+        "additionalProperties": {
+          "type": "boolean"
+        },
+        "description": "chunk_id -> was this source useful?",
+        "title": "Sources",
+        "type": "object"
+      },
+      "thread_id": {
+        "format": "uuid",
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "turn": {
+        "minimum": 1,
+        "title": "Turn",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "thread_id",
+      "turn"
+    ],
+    "title": "FeedbackRequest",
+    "type": "object"
+  },
+  "UiEventRequest": {
+    "additionalProperties": false,
+    "description": "`POST /events`: implicit signals.",
+    "properties": {
+      "kind": {
+        "enum": [
+          "regenerate",
+          "copy"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "thread_id": {
+        "format": "uuid",
+        "title": "Thread Id",
+        "type": "string"
+      },
+      "turn": {
+        "minimum": 1,
+        "title": "Turn",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "thread_id",
+      "turn",
+      "kind"
+    ],
+    "title": "UiEventRequest",
+    "type": "object"
+  }
+}

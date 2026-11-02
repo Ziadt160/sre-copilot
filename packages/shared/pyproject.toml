@@ -16,6 +16,7 @@ dependencies = [
     "tokenizers>=0.20",
     "huggingface-hub>=0.26",
     "httpx>=0.28",
+    "pyjwt>=2.9",  # the core -> mcp-ops token (contracts/ops.py)
 ]
 
 [build-system]

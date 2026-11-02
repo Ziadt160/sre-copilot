@@ -2762,6 +2762,7 @@ dependencies = [
     { name = "psycopg-pool" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyjwt" },
     { name = "pyyaml" },
     { name = "tokenizers" },
 ]
@@ -2778,6 +2779,7 @@ requires-dist = [
     { name = "psycopg-pool", specifier = ">=3.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "pydantic-settings", specifier = ">=2.6" },
+    { name = "pyjwt", specifier = ">=2.9" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "tokenizers", specifier = ">=0.20" },
 ]
