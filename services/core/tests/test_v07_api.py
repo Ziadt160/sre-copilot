@@ -316,11 +316,6 @@ async def test_admin_required_approvals_need_an_admin_and_run_as_the_requester(
     assert claims.approval_id == ap.approval_id and claims.namespaces == ["payments"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V07-8: an edit into a namespace the decider may not act in is accepted (200, "
-    "'approved') and then silently refused by the agent",
-)
 async def test_an_edit_into_a_namespace_outside_the_deciders_claims_is_refused(
     client: httpx.AsyncClient, rt: Runtime
 ) -> None:
@@ -333,11 +328,6 @@ async def test_an_edit_into_a_namespace_outside_the_deciders_claims_is_refused(
     assert r.status_code == 403
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V07-11: an edit keeps the recorded required_scope, risk and expected_effect; an "
-    "admin's edit to an admin-level call is approved and then never runs",
-)
 async def test_an_edit_rewrites_the_level_risk_and_effect_the_record_shows(
     client: httpx.AsyncClient, rt: Runtime
 ) -> None:

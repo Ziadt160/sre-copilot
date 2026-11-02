@@ -93,7 +93,7 @@ async def build_runtime(settings: Any, *, retriever: Any = None, answerer: Any =
         config = load_agent_config()
         policy = load_mcp_ops_config().policy()
         threads = make_thread_store(pool)
-        approvals = make_approval_store(pool)
+        approvals = make_approval_store(pool, policy)
         outbox = make_outbox(pool)
         cache = _factory("sre_core.cache.factory", "make_answer_cache")(pool, settings)
         budget = _factory("sre_core.budget.factory", "make_budget_guard")(settings)
