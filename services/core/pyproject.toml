@@ -8,7 +8,7 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "httpx>=0.28",
-    "pyjwt>=2.9",
+    "pyjwt[crypto]>=2.9",  # ES256/RS256 Supabase access tokens (api/auth.py)
     # Phase 3 agent (versions checked on PyPI 2026-11-02)
     "langgraph==1.2.19",
     "langgraph-checkpoint-postgres==3.2.0",
