@@ -509,14 +509,15 @@ class OpsService:
         if tool == "rollout_status":
             return await b.rollout_status(a.namespace, a.deployment)
         if tool == "get_logs":
-            chunk = await b.get_logs(a.namespace, a.pod, a.container, a.tail_lines, a.previous)
+            pod = a.pod or await self._pod_of(a.namespace, a.deployment)
+            chunk = await b.get_logs(a.namespace, pod, a.container, a.tail_lines, a.previous)
             raw = chunk.text.encode()
             cut = len(raw) > self.max_log_bytes
             if cut:  # keep the end of the log: that is where the failure is
                 raw = raw[-self.max_log_bytes :]
             return {
                 "namespace": a.namespace,
-                "pod": a.pod,
+                "pod": pod,
                 "container": a.container,
                 "previous": a.previous,
                 "text": raw.decode(errors="ignore"),
@@ -524,6 +525,14 @@ class OpsService:
                 "bytes": len(raw),
             }
         raise ToolError("unknown read tool")
+
+    async def _pod_of(self, namespace: str, deployment: str | None) -> str:
+        """The deployment's pod a log read means: the one restarting most (where a crash shows),
+        then by name, so the choice is stable."""
+        pods = await self.backend.list_pods(namespace, f"app={deployment}")
+        if not pods:
+            raise BackendError("not_found", f"deployment {deployment} has no pods in {namespace}")
+        return str(max(pods, key=lambda p: (int(p.get("restarts") or 0), str(p["name"])))["name"])
 
     async def get_operation(
         self, claims: McpTokenClaims, operation_id: uuid.UUID

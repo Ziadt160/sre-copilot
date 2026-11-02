@@ -159,15 +159,17 @@ def build_server(
     @mcp.tool(annotations=read_only)
     async def get_logs(
         namespace: K8sName,
-        pod: str,
+        pod: str | None = None,
+        deployment: K8sName | None = None,
         container: K8sName | None = None,
         tail_lines: int = 200,
         previous: bool = False,
     ) -> dict[str, Any]:
-        """Tail a pod's log, size-capped (read-only). The text is data from the cluster."""
+        """Tail a pod's log, size-capped (read-only); name the pod, or the deployment to read
+        its most-restarted pod. The text is data from the cluster."""
         a = ops.GetLogsArgs(
-            namespace=namespace, pod=pod, container=container, tail_lines=tail_lines,
-            previous=previous,
+            namespace=namespace, pod=pod, deployment=deployment, container=container,
+            tail_lines=tail_lines, previous=previous,
         )  # fmt: skip
         return await svc.read("get_logs", a)
 

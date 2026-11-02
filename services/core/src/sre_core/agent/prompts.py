@@ -89,6 +89,17 @@ REPAIR_USER = "That was not valid. Reply again with only the JSON object describ
 PROPOSABLE: tuple[str, ...] = tuple(t for t in ops.TOOL_ARGS if t != "get_operation")
 
 
+def _namespace_rule(namespaces: Sequence[str]) -> str:
+    if not namespaces:
+        return "The caller may act in no namespace: return no calls.\n"
+    names = ", ".join(sorted(namespaces))
+    if len(namespaces) == 1:
+        default = f" When the user names none, use {namespaces[0]}."
+    else:
+        default = " When the user names none and more than one could fit, ask which."
+    return f"The caller may act only in these namespaces: {names}.{default}\n"
+
+
 def _tool_catalog() -> str:
     lines = []
     for name in PROPOSABLE:
@@ -153,14 +164,18 @@ def summary_messages(
     return [{"role": "system", "content": system}, {"role": "user", "content": user}]
 
 
-def proposal_messages(user_messages: Sequence[str], message: str, max_calls: int) -> list[Message]:
+def proposal_messages(
+    user_messages: Sequence[str], message: str, max_calls: int, namespaces: Sequence[str]
+) -> list[Message]:
     """The only prompt that can lead to a tool call. It holds the user's own words (earlier user
-    messages and the current one) and the tool catalogue: no assistant text, no rewrite, no
-    retrieved text and no tool output, so none of those can steer a proposal."""
+    messages and the current one), the namespaces the caller may act in (from their verified
+    claims) and the tool catalogue: no assistant text, no rewrite, no retrieved text and no tool
+    output, so none of those can steer a proposal."""
     system = (
         PROPOSAL_SYSTEM_HEAD.replace("{max_calls}", str(max_calls))
         + _tool_catalog()
         + "\n"
+        + _namespace_rule(namespaces)
         + PROPOSAL_REPLY
     )
     prior = "\n".join(f"<turn>{neutralise(m)}</turn>" for m in user_messages)

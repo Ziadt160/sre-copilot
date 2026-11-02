@@ -159,3 +159,15 @@ async def test_a_retried_write_with_the_same_token_gets_the_stored_operation(sea
     again = await seam.client.write("restart_deployment", args, token)
     assert again.id == first.id
     assert len(seam.sim.mutation_log()) == 1
+
+
+async def test_logs_can_be_read_by_deployment(seam: Seam) -> None:
+    """The agent never sees list_pods output when it proposes calls, so it asks for a
+    deployment's logs; mcp-ops picks the pod (the one restarting most)."""
+    thread_id = await seam.thread()
+    token = seam.token(
+        sub="alice", scopes=["viewer"], namespaces=["shop"], thread_id=thread_id,
+        tools=["get_logs"],
+    )  # fmt: skip
+    out = await seam.client.read("get_logs", {"namespace": "shop", "deployment": "checkout"}, token)
+    assert out["data"]["pod"].startswith("checkout-")

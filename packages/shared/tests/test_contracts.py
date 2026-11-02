@@ -146,3 +146,11 @@ def test_a_token_names_the_tools_it_may_call() -> None:
         ops.mint_mcp_token(secret="s" * 32, sub="alice", scopes=["viewer"], namespaces=[]), "s" * 32
     )
     assert unbound.tools is None
+
+
+def test_get_logs_names_a_pod_or_a_deployment_but_not_both() -> None:
+    assert ops.parse_args("get_logs", {"namespace": "shop", "deployment": "checkout"})
+    assert ops.parse_args("get_logs", {"namespace": "shop", "pod": "checkout-abc-1"})
+    for bad in ({"namespace": "shop"}, {"namespace": "shop", "pod": "p", "deployment": "d"}):
+        with pytest.raises(pydantic.ValidationError):
+            ops.parse_args("get_logs", bad)

@@ -164,7 +164,8 @@ class FakeCluster:
                 ]
             }
         if tool == "get_logs":
-            dep_name = str(getattr(parsed, "pod", "")).rsplit("-", 1)[0]
+            pod = str(getattr(parsed, "pod", None) or "")
+            dep_name = getattr(parsed, "deployment", None) or pod.rsplit("-", 1)[0]
             d = self._deployments.get(f"{ns}/{dep_name}")
             lines = [self._failure_of(d).log] if d and d["failure"] else []
             return {"lines": [*lines, *self._planted.get(f"{ns}/{dep_name}", [])]}

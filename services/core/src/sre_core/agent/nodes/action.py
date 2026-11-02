@@ -104,7 +104,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
         async def body(meter: Meter, claims: Claims) -> Update:
             earlier = [h["content"] for h in state["history"] if h["role"] == "user"]
             messages = proposal_messages(
-                earlier[-MAX_USER_TURNS_IN_PROPOSAL:], state["message"], limit
+                earlier[-MAX_USER_TURNS_IN_PROPOSAL:], state["message"], limit, claims.namespaces
             )
             try:
                 out = await ctx.structured(

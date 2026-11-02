@@ -15,6 +15,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from sre_core.agent import testing as fk
 from sre_core.agent.factory import LangGraphChatAgent, make_chat_agent
 from sre_core.agent.ports import BudgetExceeded, MessageRecord
+from sre_core.agent.prompts import proposal_messages
 from sre_core.answer import build_answerer
 from sre_core.answer.testing import StubRetriever, chunk, fake_chat
 from sre_shared.config import AgentConfig, load_agent_config
@@ -495,6 +496,16 @@ async def test_the_proposal_prompt_holds_only_the_users_words() -> None:
     prompt = json.dumps(router_calls[-1])
     assert "restart checkout in shop" in prompt and "first question" in prompt
     assert "Pods run containers" not in prompt  # assistant text is not in it
+
+
+def test_the_proposal_prompt_names_the_callers_namespaces() -> None:
+    # The lab run's 7B model wrote namespace "default" when the request named none: the caller's
+    # namespaces come from verified claims, so they may be shown to the proposer.
+    one = json.dumps(proposal_messages([], "restart cart", 2, ["shop"]))
+    assert "may act only in these namespaces: shop. When the user names none, use shop." in one
+    many = json.dumps(proposal_messages([], "restart cart", 2, ["staging", "shop"]))
+    assert "shop, staging" in many and "ask which" in many
+    assert "no namespace" in json.dumps(proposal_messages([], "restart cart", 2, []))
 
 
 # -- memory -----------------------------------------------------------------------------

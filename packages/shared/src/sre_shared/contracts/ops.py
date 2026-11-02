@@ -90,10 +90,22 @@ class DescribeArgs(_Args):
 
 class GetLogsArgs(_Args):
     namespace: K8sName
-    pod: str = Field(min_length=1, max_length=253, pattern=r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$")
+    # A pod by name, or a deployment whose pod mcp-ops picks (as `kubectl logs deploy/<name>`
+    # does): the agent never reads tool output when it proposes calls, so it cannot copy a pod
+    # name out of an earlier list_pods.
+    pod: str | None = Field(
+        default=None, min_length=1, max_length=253, pattern=r"^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$"
+    )
+    deployment: K8sName | None = None
     container: K8sName | None = None
     tail_lines: int = Field(default=200, ge=1, le=2000)
     previous: bool = False
+
+    @model_validator(mode="after")
+    def _one_target(self) -> GetLogsArgs:
+        if (self.pod is None) == (self.deployment is None):
+            raise ValueError("give either pod or deployment")
+        return self
 
 
 class GetEventsArgs(_Args):
