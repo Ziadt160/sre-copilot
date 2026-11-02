@@ -589,3 +589,43 @@ async def test_cached_answers_follow_the_callers_groups_through_the_agent() -> N
     mate = Claims(sub="ann", groups=["team-a"])
     await h.start(mate)
     assert any(isinstance(e, ev.CacheHitEvent) for e in await h.turn("what is a pod", claims=mate))
+
+
+# -- a crash in the middle of a write --------------------------------------------------------
+
+
+class WorkerDied(BaseException):
+    """The process going away mid-node (not an Exception, so no node can swallow it)."""
+
+
+@dataclass
+class DiesAfterSending(fk.FakeOpsClient):
+    """The first write reaches mcp-ops, then the worker dies before the reply is handled."""
+
+    died: bool = False
+
+    async def write(self, tool: str, args: Mapping[str, Any], token: str) -> ops.OperationRecord:
+        rec = await super().write(tool, args, token)
+        if not self.died:
+            self.died = True
+            raise WorkerDied
+        return rec
+
+
+async def test_a_worker_dying_mid_submit_never_resubmits_on_a_resume_or_the_next_turn() -> None:
+    """The checkpoint is left with `submit_write` pending; neither a repeated resume nor a new
+    turn on the thread may run it again."""
+    h = build(ops_client=DiesAfterSending())
+    await h.start()
+    h.script(("restart_deployment", RESTART))
+    (a,) = approvals_in(await h.turn("restart checkout"))
+    await h.approve(a)
+    with pytest.raises(WorkerDied):
+        await h.resume(a)
+    snap = await h.agent._graph.aget_state({"configurable": {"thread_id": str(h.tid)}})
+    assert snap.next == ("submit_write",)
+    assert errors(await h.resume(a)) == ["NothingToResume"]
+    h.models.replies.update({"rewrite": [rewrite("What is a Pod?")], "router": [route("simple")]})
+    out = await h.turn("what is a pod")
+    assert out[-1].event == "done"
+    assert len(h.writes()) == 1
