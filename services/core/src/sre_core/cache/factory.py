@@ -27,7 +27,7 @@ from typing import Any
 import numpy as np
 from psycopg_pool import AsyncConnectionPool
 
-from sre_core.agent.ports import AnswerCache, CachedAnswer
+from sre_core.ports import AnswerCache, CachedAnswer
 from sre_shared.config import CacheSettings, load_agent_config
 from sre_shared.embed.base import Embedder
 from sre_shared.literals import find_exact_strings

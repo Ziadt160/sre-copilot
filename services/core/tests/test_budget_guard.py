@@ -7,8 +7,8 @@ from datetime import UTC, datetime, timedelta
 import fakeredis
 import pytest
 
-from sre_core.agent.ports import BudgetExceeded
 from sre_core.budget.factory import RedisBudgetGuard, make_budget_guard
+from sre_core.ports import BudgetExceeded
 from sre_shared.models import Claims
 from sre_shared.settings import Settings
 

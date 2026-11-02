@@ -14,7 +14,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sre_core.agent.ports import BudgetExceeded, BudgetGuard
+from sre_core.ports import BudgetExceeded, BudgetGuard
 from sre_shared.config import load_agent_config
 from sre_shared.models import Claims
 from sre_shared.settings import Settings, get_settings

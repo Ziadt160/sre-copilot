@@ -10,7 +10,6 @@ import numpy as np
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from sre_core.agent.ports import CachedAnswer
 from sre_core.cache.factory import (
     CacheRefused,
     TwoTierAnswerCache,
@@ -18,6 +17,7 @@ from sre_core.cache.factory import (
     make_answer_cache,
     scope_hash,
 )
+from sre_core.ports import CachedAnswer
 from sre_shared.config import CacheSettings
 from sre_shared.models import Citation, Claims
 from sre_shared.settings import Settings
