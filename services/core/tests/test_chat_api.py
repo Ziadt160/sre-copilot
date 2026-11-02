@@ -50,7 +50,7 @@ class ClockedApprovals(PgApprovalStore):
     """FakeChatAgent reads `approvals.clock()`; tests move it to create old approvals."""
 
     def __init__(self, pool: AsyncConnectionPool[Any]) -> None:
-        super().__init__(pool)
+        super().__init__(pool, POLICY)
         self.clock = utcnow
 
 

@@ -17,9 +17,7 @@ def make_thread_store(pool: AsyncConnectionPool[Any]) -> PgThreadStore:
     return PgThreadStore(pool)
 
 
-def make_approval_store(
-    pool: AsyncConnectionPool[Any], policy: NamespacePolicy | None = None
-) -> PgApprovalStore:
+def make_approval_store(pool: AsyncConnectionPool[Any], policy: NamespacePolicy) -> PgApprovalStore:
     return PgApprovalStore(pool, policy)
 
 

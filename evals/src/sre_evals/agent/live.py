@@ -170,7 +170,7 @@ async def live_rig(models: str = "lab", *, seed: int = 7) -> AsyncIterator[RigFa
                     ops_client: OpsClient = (
                         DroppedReplyOps(http_ops) if faults.dup_write else http_ops
                     )
-                    threads, approvals = PgThreadStore(pool), PgApprovalStore(pool)
+                    threads, approvals = PgThreadStore(pool), PgApprovalStore(pool, policy)
                     agent = make_chat_agent(
                         threads=threads, approvals=approvals, ops=ops_client,
                         cache=MemoryAnswerCache(), budget=FakeBudgetGuard(), models=router,

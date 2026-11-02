@@ -31,9 +31,7 @@ def _record(row: Mapping[str, Any]) -> ops.ApprovalRecord:
 
 
 class PgApprovalStore:
-    def __init__(
-        self, pool: AsyncConnectionPool[Any], policy: ops.NamespacePolicy | None = None
-    ) -> None:
+    def __init__(self, pool: AsyncConnectionPool[Any], policy: ops.NamespacePolicy) -> None:
         self.pool = pool
         # Needed to re-rate an edited call (risk, required level); set by the runtime.
         self.policy = policy
@@ -85,7 +83,7 @@ class PgApprovalStore:
             norm = ops.normalize_args(current.tool, args)
             ns, target = ops.target_of(current.tool, ops.parse_args(current.tool, norm))
             parsed = ops.parse_args(current.tool, norm)
-            policy = self.policy or ops.NamespacePolicy(allowed=frozenset())
+            policy = self.policy
             level = ops.required_approval(current.tool, parsed, policy, route="action")
             scope = "admin" if "admin" in (level, current.required_scope) else "operator"
             sets += [

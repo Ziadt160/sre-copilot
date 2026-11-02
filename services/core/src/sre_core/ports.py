@@ -11,7 +11,7 @@ parallel and wired together only in `sre_core.api.runtime`. Implementations are 
 factories at fixed paths, which `runtime.build_runtime` calls (T13 owns runtime.py):
 
     sre_core.store.factory.make_thread_store(pool) -> ThreadStore             (T13)
-    sre_core.store.factory.make_approval_store(pool) -> ApprovalStore         (T13)
+    sre_core.store.factory.make_approval_store(pool, policy) -> ApprovalStore (T13)
     sre_core.store.factory.make_outbox(pool) -> Outbox                        (T13)
     sre_core.cache.factory.make_answer_cache(pool, settings) -> AnswerCache   (T14)
     sre_core.budget.factory.make_budget_guard(settings) -> BudgetGuard        (T14)

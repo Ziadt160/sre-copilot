@@ -129,7 +129,7 @@ ROOT = hdr("root", "viewer", "operator", "admin")
 
 @pytest.fixture
 async def rt(db: object, pool: AsyncConnectionPool) -> Runtime:
-    threads, approvals, outbox = PgThreadStore(pool), PgApprovalStore(pool), PgOutbox(pool)
+    threads, approvals, outbox = PgThreadStore(pool), PgApprovalStore(pool, POLICY), PgOutbox(pool)
     ops_client, cache, budget, models = (
         fk.FakeOpsClient(),
         fk.MemoryAnswerCache(),

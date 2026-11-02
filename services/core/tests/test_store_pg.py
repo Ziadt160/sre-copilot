@@ -84,7 +84,7 @@ def _approval(thread_id: uuid.UUID, ttl: timedelta = timedelta(minutes=15)) -> o
 
 
 async def test_decide_once_never_after_expiry(db: object, pool: AsyncConnectionPool) -> None:
-    threads, approvals = PgThreadStore(pool), PgApprovalStore(pool)
+    threads, approvals = PgThreadStore(pool), PgApprovalStore(pool, POLICY)
     t = await threads.create(ALICE)
     a = await approvals.create(_approval(t.id))
     results = await asyncio.gather(
@@ -105,7 +105,7 @@ async def test_decide_once_never_after_expiry(db: object, pool: AsyncConnectionP
 async def test_edit_updates_args_hash_and_visibility_follows_rls(
     db: object, pool: AsyncConnectionPool
 ) -> None:
-    threads, approvals = PgThreadStore(pool), PgApprovalStore(pool)
+    threads, approvals = PgThreadStore(pool), PgApprovalStore(pool, POLICY)
     t = await threads.create(ALICE)
     scale = new_approval(
         t.id, 1, "scale_deployment", {"namespace": "shop", "deployment": "web", "replicas": 2},

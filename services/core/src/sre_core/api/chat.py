@@ -391,8 +391,6 @@ async def decide_approval(
     new_args: dict[str, Any] | None = None
     if body.decision == "edit":
         new_args = _checked_edit(rt, rec, body.args, claims)
-        if isinstance(rt.approvals, PgApprovalStore) and rt.approvals.policy is None:
-            rt.approvals.policy = rt.policy
     elif body.args is not None:
         raise HTTPException(status_code=422, detail="args are accepted only with decision=edit")
 
