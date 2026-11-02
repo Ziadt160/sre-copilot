@@ -270,8 +270,11 @@ class OpsService:
         self, claims: McpTokenClaims, tool: str, args: Any, level: str
     ) -> str | None:
         """None when the token's approval covers exactly this call; otherwise why not."""
-        if level not in claims.scopes:
-            return f"{tool} here needs the {level} scope"
+        # Approved writes run on behalf of the requester (O-2): the token never carries admin.
+        # An admin-level call is proven by the approval row (required_scope, decided_by), which
+        # core only sets after checking the approver held admin.
+        if "operator" not in claims.scopes:
+            return f"{tool} needs the operator scope"
         if claims.approval_id is None:
             return f"{tool} needs an approval"
         appr = await self.store.get_approval(claims.approval_id)
