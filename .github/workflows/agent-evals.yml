@@ -1,0 +1,43 @@
+name: agent-evals
+
+# The PR subset of agent-v1 on fakes: the oracle agent over a fake cluster, with the three
+# injected faults. It checks the task set, the runner and the metrics; it makes no hosted model
+# calls and needs no database. The real agent against the simulator runs nightly in the lab.
+on:
+  pull_request:
+    paths:
+      - "evals/**"
+      - "packages/shared/src/sre_shared/contracts/**"
+      - "config/simulator/**"
+      - "config/mcp_ops.yaml"
+      - ".github/workflows/agent-evals.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-evals-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+  SRE_TRACING: "off"
+
+jobs:
+  agent-evals:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v5.4.1
+        with:
+          enable-cache: true
+      - run: uv sync
+      - name: Task set is sound
+        run: uv run sre-eval agent validate
+      - name: Agent evals (PR subset, all faults)
+        run: uv run sre-eval agent run --subset pr --faults --rig fake --min-success 1.0 --report agent-section.md
+      - name: Agent evals (PR subset, no faults)
+        run: uv run sre-eval agent run --subset pr --rig fake --min-success 1.0
+      - name: Show the results section
+        run: cat agent-section.md
