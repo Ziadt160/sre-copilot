@@ -9,8 +9,8 @@ from datetime import timedelta
 import pytest
 from psycopg_pool import AsyncConnectionPool
 
-from sre_core.agent.ports import MessageRecord, ThreadBusy, ThreadNotFound
 from sre_core.agent.testing import new_approval, utcnow
+from sre_core.ports import MessageRecord, ThreadBusy, ThreadNotFound
 from sre_core.store import outbox as ob
 from sre_core.store.approvals import PgApprovalStore
 from sre_core.store.checkpoints import make_checkpoint_pool, make_checkpointer, setup_checkpointer
@@ -26,7 +26,9 @@ BOB = Claims(sub="bob")
 POLICY = ops.NamespacePolicy(allowed=frozenset({"shop"}))
 
 
-async def test_turns_claimed_in_order_under_concurrency(db: object, pool: AsyncConnectionPool) -> None:
+async def test_turns_claimed_in_order_under_concurrency(
+    db: object, pool: AsyncConnectionPool
+) -> None:
     threads = PgThreadStore(pool)
     t = await threads.create(ALICE, "x")
     turns = await asyncio.gather(*[threads.claim_turn(ALICE, t.id) for _ in range(8)])
@@ -59,7 +61,9 @@ async def test_busy_thread_refused_and_other_user_sees_nothing(
         await threads.claim_turn(Claims(sub="a", role="anon"), t.id)
 
 
-async def test_client_message_id_returns_the_same_turn(db: object, pool: AsyncConnectionPool) -> None:
+async def test_client_message_id_returns_the_same_turn(
+    db: object, pool: AsyncConnectionPool
+) -> None:
     threads = PgThreadStore(pool)
     a, b = await asyncio.gather(
         *[threads.claim_message(ALICE, None, "hi", client_message_id="m1") for _ in range(2)]
@@ -153,7 +157,10 @@ async def test_checkpointer_setup_and_roundtrip(pg_dsn: str) -> None:
     await cp.open()
     try:
         saver = make_checkpointer(cp)
-        assert await saver.aget_tuple({"configurable": {"thread_id": "none", "checkpoint_ns": ""}}) is None
+        assert (
+            await saver.aget_tuple({"configurable": {"thread_id": "none", "checkpoint_ns": ""}})
+            is None
+        )
         async with cp.connection() as conn:
             cur = await conn.execute(
                 "select count(*) as n from information_schema.tables "

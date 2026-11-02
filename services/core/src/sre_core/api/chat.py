@@ -21,7 +21,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
-from sre_core.agent.ports import (
+from sre_core.answer.service import ConfigError
+from sre_core.api.auth import claims_from_authorization
+from sre_core.api.runs import RunManager, resume_source, sweep_once
+from sre_core.api.runtime import Runtime, register_default_handlers
+from sre_core.ports import (
     BudgetExceeded,
     ChatAgent,
     MessageRecord,
@@ -29,10 +33,6 @@ from sre_core.agent.ports import (
     ThreadNotFound,
     ThreadRecord,
 )
-from sre_core.answer.service import ConfigError
-from sre_core.api.auth import claims_from_authorization
-from sre_core.api.runs import RunManager, resume_source, sweep_once
-from sre_core.api.runtime import Runtime, register_default_handlers
 from sre_core.retrieval import NoActiveCorpusError
 from sre_core.store.approvals import PgApprovalStore
 from sre_core.store.feedback import PgFeedbackStore

@@ -41,7 +41,9 @@ from sre_shared.settings import get_settings
 pytestmark = pytest.mark.integration
 
 SECRET = "test-secret-test-secret-test-secret-0123"
-POLICY = ops.NamespacePolicy(allowed=frozenset({"shop", "payments"}), protected=frozenset({"payments"}))
+POLICY = ops.NamespacePolicy(
+    allowed=frozenset({"shop", "payments"}), protected=frozenset({"payments"})
+)
 
 
 class ClockedApprovals(PgApprovalStore):
@@ -148,7 +150,9 @@ async def settle(rt: Runtime) -> None:
     await services(rt).manager.idle()
 
 
-async def propose(c: httpx.AsyncClient, rt: Runtime, who: dict[str, str] = ALICE) -> ev.ApprovalRequiredEvent:
+async def propose(
+    c: httpx.AsyncClient, rt: Runtime, who: dict[str, str] = ALICE
+) -> ev.ApprovalRequiredEvent:
     r = await say(c, who, "please restart checkout")
     assert r.status_code == 200
     last = parse(r.text)[-1]
@@ -224,7 +228,9 @@ async def test_busy_thread_is_409_until_the_approval_is_decided(
     ap = await propose(client, rt)
     tid = (await client.get("/approvals", headers=ALICE)).json()[0]["thread_id"]
     assert (await say(client, ALICE, "more", thread_id=tid)).status_code == 409
-    r = await client.post(f"/approvals/{ap.approval_id}", json={"decision": "approve"}, headers=ALICE)
+    r = await client.post(
+        f"/approvals/{ap.approval_id}", json={"decision": "approve"}, headers=ALICE
+    )
     assert r.status_code == 200 and r.json()["approval"]["status"] == "approved"
     await settle(rt)
     assert (await say(client, ALICE, "more", thread_id=tid)).status_code == 200
@@ -249,13 +255,17 @@ async def test_approve_after_expiry_is_409_and_nothing_runs(
 ) -> None:
     cast(ClockedApprovals, rt.approvals).clock = lambda: utcnow() - timedelta(minutes=20)
     ap = await propose(client, rt)
-    r = await client.post(f"/approvals/{ap.approval_id}", json={"decision": "approve"}, headers=ALICE)
+    r = await client.post(
+        f"/approvals/{ap.approval_id}", json={"decision": "approve"}, headers=ALICE
+    )
     assert r.status_code == 409
     await settle(rt)
     # the sweep step released the thread with an "expired" resume, never an approved one
     assert [a.status for a in agent_of(rt).resumed] == ["expired"]
     tid = (await client.get("/threads", headers=ALICE)).json()[0]["id"]
-    assert (await client.get(f"/threads/{tid}", headers=ALICE)).json()["thread"]["status"] == "active"
+    assert (await client.get(f"/threads/{tid}", headers=ALICE)).json()["thread"][
+        "status"
+    ] == "active"
 
 
 async def test_sweeper_expires_and_resumes(client: httpx.AsyncClient, rt: Runtime) -> None:
@@ -310,14 +320,22 @@ async def test_edit_is_revalidated(client: httpx.AsyncClient, rt: Runtime) -> No
     aid = await _scale_approval(rt, "alice")
 
     def edit(args: dict[str, Any], who: dict[str, str] = ALICE) -> Any:
-        return client.post(f"/approvals/{aid}", json={"decision": "edit", "args": args}, headers=who)
+        return client.post(
+            f"/approvals/{aid}", json={"decision": "edit", "args": args}, headers=who
+        )
 
     assert (await edit({**base, "replicas": 0})).status_code == 403  # now needs an admin
     assert (await edit({**base, "replicas": 2, "extra": 1})).status_code == 422
-    assert (await edit({"namespace": "kube-system", "deployment": "web", "replicas": 1})).status_code == 403
+    assert (
+        await edit({"namespace": "kube-system", "deployment": "web", "replicas": 1})
+    ).status_code == 403
     r = await edit({**base, "replicas": 5})
     assert r.status_code == 200 and r.json()["approval"]["args"]["replicas"] == 5
-    assert (await client.post(f"/approvals/{aid}", json={"decision": "approve", "args": base}, headers=ALICE)).status_code in (409, 422)
+    assert (
+        await client.post(
+            f"/approvals/{aid}", json={"decision": "approve", "args": base}, headers=ALICE
+        )
+    ).status_code in (409, 422)
 
     aid = await _scale_approval(rt, "root")
     r = await edit({**base, "replicas": 0}, ADMIN)
@@ -329,7 +347,9 @@ async def test_resume_continues_when_nobody_is_listening(
 ) -> None:
     ap = await propose(client, rt)
     gate = agent_of(rt).gate = asyncio.Event()
-    r = await client.post(f"/approvals/{ap.approval_id}", json={"decision": "approve"}, headers=ALICE)
+    r = await client.post(
+        f"/approvals/{ap.approval_id}", json={"decision": "approve"}, headers=ALICE
+    )
     assert r.status_code == 200  # the request is over; the run is still waiting on the gate
     tid = (await client.get("/approvals?status=pending", headers=ALICE)).json()
     assert tid == []
@@ -346,10 +366,13 @@ async def test_resume_continues_when_nobody_is_listening(
 
 async def test_abandoned_chat_stream_still_finishes(client: httpx.AsyncClient, rt: Runtime) -> None:
     gate = agent_of(rt).gate = asyncio.Event()
-    async with client.stream("POST", "/chat", json={"message": "slow"}, headers=ALICE) as r:
-        assert r.status_code == 200
-        async for _ in r.aiter_lines():
-            break  # read the first frame, then walk away
+    req = asyncio.create_task(say(client, ALICE, "slow"))
+    for _ in range(100):  # wait until the run exists, then drop the client
+        await asyncio.sleep(0.02)
+        if services(rt).manager._tasks:
+            break
+    req.cancel()
+    await asyncio.gather(req, return_exceptions=True)
     gate.set()
     await settle(rt)
     tid = (await client.get("/threads", headers=ALICE)).json()[0]["id"]
@@ -381,13 +404,59 @@ async def test_feedback_and_events_are_the_users_and_sync_is_enqueued_once(
     body = {"thread_id": tid, "turn": 1, "rating": -1, "reason": "wrong", "sources": {"7": True}}
     for _ in range(2):
         assert (await client.post("/feedback", json=body, headers=ALICE)).status_code == 200
-    assert (await client.post("/events", json={"thread_id": tid, "turn": 1, "kind": "copy"}, headers=ALICE)).status_code == 200
+    assert (
+        await client.post(
+            "/events", json={"thread_id": tid, "turn": 1, "kind": "copy"}, headers=ALICE
+        )
+    ).status_code == 200
     assert (await client.post("/feedback", json=body, headers=BOB)).status_code == 404
-    assert (await client.post("/feedback", json={**body, "turn": 9}, headers=ALICE)).status_code == 404
-    assert (await client.post("/events", json={"thread_id": tid, "turn": 1, "kind": "copy"}, headers=BOB)).status_code == 404
+    assert (
+        await client.post("/feedback", json={**body, "turn": 9}, headers=ALICE)
+    ).status_code == 404
+    assert (
+        await client.post(
+            "/events", json={"thread_id": tid, "turn": 1, "kind": "copy"}, headers=BOB
+        )
+    ).status_code == 404
     async with pool.connection() as conn:
         fb = await (await conn.execute("select owner_sub, rating from public.feedback")).fetchall()
-        ob = await (await conn.execute("select kind, payload from public.outbox where kind = 'feedback_sync'")).fetchall()
+        ob = await (
+            await conn.execute(
+                "select kind, payload from public.outbox where kind = 'feedback_sync'"
+            )
+        ).fetchall()
         n_events = await (await conn.execute("select owner_sub from public.ui_events")).fetchall()
     assert fb == [{"owner_sub": "alice", "rating": -1}] and len(n_events) == 1
-    assert len(ob) == 1 and ob[0]["payload"]["owner_sub"] == "alice" and ob[0]["payload"]["rating"] == -1
+    assert (
+        len(ob) == 1
+        and ob[0]["payload"]["owner_sub"] == "alice"
+        and ob[0]["payload"]["rating"] == -1
+    )
+
+
+async def test_build_runtime_wires_real_stores(
+    pg_dsn: str, monkeypatch: pytest.MonkeyPatch, db: object
+) -> None:
+    from sre_core.api import runtime as rtm
+
+    seen: dict[str, Any] = {}
+
+    def fake_factory(module: str, name: str) -> Any:
+        def make(*args: Any, **kw: Any) -> Any:
+            seen[name] = (args, kw)
+            return object() if name != "make_chat_agent" else "agent"
+
+        return make
+
+    monkeypatch.setenv("DATABASE_URL", pg_dsn)
+    get_settings.cache_clear()
+    monkeypatch.setattr(rtm, "_factory", fake_factory)
+    built = await rtm.build_runtime(get_settings(), retriever=object(), answerer=object())
+    try:
+        assert isinstance(built.threads, PgThreadStore) and built.agent == "agent"
+        assert isinstance(built.approvals, PgApprovalStore) and isinstance(built.outbox, PgOutbox)
+        kw = seen["make_chat_agent"][1]
+        assert kw["checkpointer"] is built.extras["checkpointer"]  # type: ignore[index]
+        assert kw["threads"] is built.threads and kw["policy"] == built.policy
+    finally:
+        await rtm.close_runtime(built)

@@ -18,7 +18,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable
 from functools import partial
 
-from sre_core.agent.ports import (
+from sre_core.ports import (
     ApprovalStore,
     BudgetExceeded,
     ChatAgent,

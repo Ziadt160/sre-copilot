@@ -13,7 +13,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 from psycopg_pool import AsyncConnectionPool
 
-from sre_core.agent.ports import (
+from sre_core.ports import (
     MessageRecord,
     ThreadBusy,
     ThreadNotFound,
