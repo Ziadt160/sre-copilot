@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,6 +16,9 @@ from fastapi.responses import StreamingResponse
 from sre_core.answer import Answerer, build_answerer
 from sre_core.answer.service import ConfigError, error_event
 from sre_core.api.auth import claims_from_authorization
+from sre_core.api.chat import router as chat_router
+from sre_core.api.chat import start_background, stop_background
+from sre_core.api.runtime import Runtime, build_runtime, close_runtime
 from sre_core.retrieval import NoActiveCorpusError, Retriever
 from sre_core.retrieval.rerank import default_reranker
 from sre_shared.config import load_retrieval_defaults
@@ -56,19 +60,33 @@ def create_app(
     retriever: Retriever | None = None,
     answerer: Answerer | None = None,
     allow_request_config: bool = False,
+    runtime: Runtime | None = None,
 ) -> FastAPI:
     """Build the app. Tests pass a `Retriever` (and optionally an `Answerer`) on their own pool;
     production opens a pool at startup. `allow_request_config` lets `/answer` callers send their
     own `AnswerConfig` (model, floor, tokens): off by default, because it would let anyone pick
-    the model and disable abstention."""
+    the model and disable abstention. The chat routes are mounted when a `runtime` is given, or
+    in production, where the lifespan builds one (chat answers 503 if that failed)."""
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        if retriever is not None:
-            app.state.retriever = retriever
-            app.state.answerer = answerer or build_answerer(retriever)
-            yield
-            return
+        if runtime is not None:
+            app.state.runtime = runtime
+            start_background(runtime)
+        try:
+            if retriever is not None:
+                app.state.retriever = retriever
+                app.state.answerer = answerer or build_answerer(retriever)
+                yield
+                return
+            async with _production(app):
+                yield
+        finally:
+            if runtime is not None:
+                await stop_background(runtime)
+
+    @asynccontextmanager
+    async def _production(app: FastAPI) -> AsyncIterator[None]:
         pool = create_pool()
         await pool.open()
         replica_url = get_settings().database_replica_url
@@ -79,9 +97,22 @@ def create_app(
             await read_pool.open()  # failures fall back to the primary per request
         app.state.retriever = Retriever(pool, read_pool=read_pool, reranker=default_reranker())
         app.state.answerer = build_answerer(app.state.retriever)
+        built: Runtime | None = None
+        if runtime is None:
+            try:
+                built = await build_runtime(
+                    get_settings(), retriever=app.state.retriever, answerer=app.state.answerer
+                )
+                app.state.runtime = built
+                start_background(built)
+            except Exception:
+                logging.getLogger(__name__).exception("chat runtime unavailable; /chat answers 503")
         try:
             yield
         finally:
+            if built is not None:
+                await stop_background(built)
+                await close_runtime(built)
             if read_pool is not None:
                 await read_pool.close()
             await pool.close()
@@ -90,6 +121,10 @@ def create_app(
     if retriever is not None:
         app.state.retriever = retriever
         app.state.answerer = answerer or build_answerer(retriever)
+    if runtime is not None:
+        app.state.runtime = runtime
+    if runtime is not None or retriever is None:
+        app.include_router(chat_router)
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
