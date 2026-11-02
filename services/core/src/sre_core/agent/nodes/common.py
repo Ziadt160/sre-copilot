@@ -215,16 +215,29 @@ class Ctx:
         if meter.tokens + planned > lim.answer_token_budget:
             raise LimitReached("token_budget", "This turn used up its token budget.")
 
-    async def charge(self, meter: Meter, claims: Claims, planned: int) -> None:
+    async def charge(self, meter: Meter, claims: Claims, planned: int) -> int:
+        """Check the turn's limits, then hold what is left of the turn's token budget against
+        the user's day allowance and return the hold; the matching `record` (or `release`) passes
+        it back. The hold bounds whatever the call spends (prompt included), so parallel turns
+        cannot overshoot the day allowance (V07-6); the API already refuses a turn without that
+        much headroom."""
         self.check_limits(meter, planned)
-        await self.budget.check(claims, planned)
+        hold = max(self.cfg.limits.answer_token_budget - meter.tokens, planned)
+        await self.budget.reserve(claims, hold)
+        return hold
 
-    async def record(self, meter: Meter, claims: Claims, prompt: int, completion: int) -> None:
+    async def record(
+        self, meter: Meter, claims: Claims, prompt: int, completion: int, *, reserved: int = 0
+    ) -> None:
         meter.decisions += 1
         meter.prompt += prompt
         meter.completion += completion
         meter.tokens += prompt + completion
-        await self.budget.record(claims, prompt + completion)
+        await self.budget.record(claims, prompt + completion, reserved=reserved)
+
+    async def release(self, claims: Claims, reserved: int) -> None:
+        """Give back a hold whose call spent nothing (it failed, or no model ran)."""
+        await self.budget.record(claims, 0, reserved=reserved)
 
     async def complete(
         self,
@@ -236,14 +249,18 @@ class Ctx:
         max_tokens: int,
         json_mode: bool = False,
     ) -> ChatResult:
-        await self.charge(meter, claims, max_tokens)
-        res = await self.models.complete(
-            role,
-            messages,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"} if json_mode else None,
-        )
-        await self.record(meter, claims, res.prompt_tokens, res.completion_tokens)
+        hold = await self.charge(meter, claims, max_tokens)
+        try:
+            res = await self.models.complete(
+                role,
+                messages,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"} if json_mode else None,
+            )
+        except BaseException:
+            await self.release(claims, hold)
+            raise
+        await self.record(meter, claims, res.prompt_tokens, res.completion_tokens, reserved=hold)
         return res
 
     async def structured(

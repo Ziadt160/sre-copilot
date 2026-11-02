@@ -436,10 +436,6 @@ class SlowCostlyModel(fk.ScriptedModelRouter):
         return replace(res, prompt_tokens=1000, completion_tokens=500)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V07-6: the day budget is checked, not reserved; N parallel turns overshoot it N-fold",
-)
 async def test_parallel_turns_cannot_overshoot_the_day_allowance() -> None:
     allowance = 6000
     redis = fakeredis.FakeAsyncRedis()

@@ -86,10 +86,11 @@ def make_answer_nodes(ctx: Ctx) -> dict[str, Node]:
 
         async def body(meter: Meter, claims: Claims) -> Update:
             question = state["standalone"]
-            await ctx.charge(meter, claims, ctx.answer_cfg.max_tokens)
+            hold = await ctx.charge(meter, claims, ctx.answer_cfg.max_tokens)
             try:
                 res = await ctx.answerer.answer(AnswerRequest(question=question), claims)
             except _MODEL_DOWN:
+                await ctx.release(claims, hold)
                 log.warning("answer model unavailable: extractive fallback")
                 found = await ctx.retrieve(question, claims)
                 if no_support(found.chunks):
@@ -109,7 +110,11 @@ def make_answer_nodes(ctx: Ctx) -> dict[str, Node]:
                 }
             ctx.corpus_version_id = res.corpus_version_id
             if not res.abstained or res.prompt_tokens or res.completion_tokens:
-                await ctx.record(meter, claims, res.prompt_tokens, res.completion_tokens)
+                await ctx.record(
+                    meter, claims, res.prompt_tokens, res.completion_tokens, reserved=hold
+                )
+            else:
+                await ctx.release(claims, hold)
             if res.citations:
                 ctx.emit(SourcesEvent(sources=res.citations))
             return {
