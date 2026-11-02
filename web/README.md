@@ -21,3 +21,18 @@ npx playwright install chromium && npm run test:e2e   # needs a build made with 
 (`uv run python -m sre_shared.contracts.export`); `npm run check:types` fails when the generated
 types are stale. In the mock, a message containing "restart" proposes a write that needs
 approval, "outage" escalates, "unknown" abstains; anything else streams an answer with sources.
+
+## End to end against the real stack (local, not CI)
+
+`e2e-live/` drives the real path: Supabase login, `/chat` over SSE, the agent graph, an approval
+stored in Postgres, the resumed run calling mcp-ops with a minted token, the simulator. It needs
+the local Supabase stack with the Phase 3 migrations applied, the core API on :8000, mcp-ops on
+:8100, Redis, this app on :3000 (`npm run dev` with the real URLs), and a test login whose
+`app_metadata` holds `scopes` and `namespaces`:
+
+```
+E2E_EMAIL=... E2E_PASSWORD=... npx playwright test --config playwright.live.config.ts
+```
+
+It checks a documented answer with sources, a restart that waits for approval and then runs once,
+and a rejected scale that runs nothing (the operations table holds one write for the run).

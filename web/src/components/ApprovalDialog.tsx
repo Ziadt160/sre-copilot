@@ -34,10 +34,12 @@ export function ApprovalDialog({ approval, busy, error, onDecide, onClose }: Pro
   const [reason, setReason] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
 
+  // No close() on cleanup: it fires the dialog's close event, which the chat reads as "decide
+  // later", and React runs every effect's cleanup once on mount in development (StrictMode), so
+  // the dialog closed itself the moment it opened. Unmounting removes the element anyway.
   useEffect(() => {
     const dialog = ref.current;
     if (dialog && !dialog.open) dialog.showModal();
-    return () => dialog?.close();
   }, []);
 
   useEffect(() => {
