@@ -20,7 +20,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import get_args
 
-import httpx
+import httpx2
 import openai
 from openai import AsyncOpenAI
 
@@ -53,7 +53,7 @@ CHAIN_SDK_RETRIES = 0
 _ADVANCE_STATUS = frozenset({401, 402, 403, 404, 408, 429})
 
 ClientWrapper = Callable[[AsyncOpenAI], AsyncOpenAI]
-HttpClientFactory = Callable[[ModelSpec], httpx.AsyncClient | None]
+HttpClientFactory = Callable[[ModelSpec], httpx2.AsyncClient | None]
 
 
 class AllProvidersFailed(RuntimeError):
@@ -76,7 +76,7 @@ def should_advance(exc: BaseException) -> bool:
         return True
     if isinstance(exc, openai.APIStatusError):
         return exc.status_code >= 500 or exc.status_code in _ADVANCE_STATUS
-    return isinstance(exc, httpx.TransportError)
+    return False
 
 
 @dataclass
@@ -240,7 +240,7 @@ def extractive_answer(question: str, context: Sequence[RetrievedChunk]) -> tuple
         if not quote:
             continue
         title = members[0].title
-        parts.append(f"From {title}: \"{quote}\" [{n}]")
+        parts.append(f'From {title}: "{quote}" [{n}]')
         used.append(n)
     if not parts:
         return "", []
