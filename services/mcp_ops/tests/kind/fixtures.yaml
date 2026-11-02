@@ -1,0 +1,54 @@
+# Workloads the kind contract tests expect: the names the simulator's default scenario also has
+# (shop/web with revisions 1 and 2, payments/api). The pause image runs anywhere and is healthy
+# without configuration. The workflow adds revision 2 of shop/web with `kubectl set image`.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: payments
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: staging
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop
+  labels: {app: web}
+spec:
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels: {app: web}
+  template:
+    metadata:
+      labels: {app: web}
+    spec:
+      containers:
+        - name: web
+          image: registry.k8s.io/pause:3.9
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: payments
+  labels: {app: api}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: api}
+  template:
+    metadata:
+      labels: {app: api}
+    spec:
+      containers:
+        - name: api
+          image: registry.k8s.io/pause:3.9

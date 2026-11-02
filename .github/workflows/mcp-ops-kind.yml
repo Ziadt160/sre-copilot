@@ -1,0 +1,76 @@
+name: mcp-ops-kind
+
+# The same mcp-ops contract tests that pass against the simulator, run against a real API server
+# (kind). Only the cluster-facing tests run here; they are parametrised on --backend.
+on:
+  pull_request:
+    paths:
+      - "services/mcp_ops/**"
+      - "packages/shared/src/sre_shared/contracts/ops.py"
+      - ".github/workflows/mcp-ops-kind.yml"
+  push:
+    branches: [main]
+    paths:
+      - "services/mcp_ops/**"
+
+concurrency:
+  group: mcp-ops-kind-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      testdb:
+        image: public.ecr.aws/supabase/postgres:17.11.0.006
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 54400:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+          --health-start-period 20s
+    env:
+      SRE_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:54400/postgres
+    steps:
+      - uses: actions/checkout@v4.2.2
+      - uses: astral-sh/setup-uv@v5.4.1
+        with:
+          enable-cache: true
+      - run: uv sync
+      # The kind extra is not in the default environment; install the version the lock names.
+      - run: uv pip install "kubernetes==37.0.1"
+      - uses: helm/kind-action@v1.12.0
+        with:
+          cluster_name: mcp-ops
+      - name: Apply fixture workloads
+        run: |
+          kubectl apply -f services/mcp_ops/tests/kind/fixtures.yaml
+          kubectl -n shop rollout status deployment/web --timeout=180s
+          kubectl -n payments rollout status deployment/api --timeout=180s
+          # A second revision, so rollback has something to go back to.
+          kubectl -n shop set image deployment/web web=registry.k8s.io/pause:3.10
+          kubectl -n shop rollout status deployment/web --timeout=180s
+          kubectl -n shop get rs
+      - name: Wait for Postgres
+        run: |
+          for _ in $(seq 1 60); do
+            if uv run python -c "import os, psycopg; psycopg.connect(os.environ['SRE_TEST_DATABASE_URL'], connect_timeout=3).execute('select 1')"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres did not become ready" >&2
+          exit 1
+      - name: Contract tests against kind
+        run: uv run pytest services/mcp_ops/tests/test_contract.py services/mcp_ops/tests/test_safety.py --backend kind -q
