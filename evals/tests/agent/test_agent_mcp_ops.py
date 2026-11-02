@@ -143,3 +143,19 @@ async def test_escalation_opens_an_incident_and_pages(seam: Seam) -> None:
     incident_id = (created.result or {})["incident_id"]
     paged = await seam.client.escalate("page_oncall", {"incident_id": str(incident_id)}, token)
     assert paged.status == "succeeded"
+
+
+async def test_a_retried_write_with_the_same_token_gets_the_stored_operation(seam: Seam) -> None:
+    """A reply lost on the way back makes the client send the same request again, with the same
+    single-use token: it must get the stored operation, not a refusal (dup_write fault)."""
+    thread_id = await seam.thread()
+    args = {"namespace": "shop", "deployment": "checkout"}
+    approval_id = await seam.approval(thread_id, "restart_deployment", args)
+    token = seam.token(
+        sub="alice", scopes=["viewer", "operator"], namespaces=["shop"], thread_id=thread_id,
+        approval_id=approval_id, tools=["restart_deployment"],
+    )  # fmt: skip
+    first = await seam.client.write("restart_deployment", args, token)
+    again = await seam.client.write("restart_deployment", args, token)
+    assert again.id == first.id
+    assert len(seam.sim.mutation_log()) == 1

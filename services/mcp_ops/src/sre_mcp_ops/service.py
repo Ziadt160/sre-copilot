@@ -179,9 +179,29 @@ class OpsService:
             )
         return ToolError(f"refused: {reason}")
 
+    async def _is_replay(self, claims: McpTokenClaims, tool: str, raw: dict[str, Any]) -> bool:
+        """True only for this caller's own, already stored write or escalation under the token's
+        thread and turn. Anything malformed, unbound or not allowed by the token is not a replay
+        and pays for its call as before."""
+        if _unstorable(tool) or _unstorable(raw) or tool not in ops.TOOL_ARGS:
+            return False
+        if claims.tools is not None and tool not in claims.tools:
+            return False
+        if ops.tool_kind(tool) == "read" or claims.thread_id is None or claims.turn is None:
+            return False
+        try:
+            key = ops.idempotency_key(claims.thread_id, claims.turn, tool, raw)
+        except (ValidationError, ValueError):
+            return False
+        stored = await self.store.get_by_key(key)
+        return stored is not None and stored["subject"] == claims.sub and stored["tool"] == tool
+
     async def admit(self, claims: McpTokenClaims, tool: str, raw: dict[str, Any]) -> Admission:
         started = time.monotonic()
-        if not self.budget.hit(claims):
+        # A client that lost a reply resends the same request with the same token. That is a
+        # replay of an operation already admitted, so it must get the stored result instead of
+        # a "used up" refusal; every other check below still runs. A new key spends a call.
+        if not await self._is_replay(claims, tool, raw) and not self.budget.hit(claims):
             raise await self._refuse(
                 claims, tool, raw, "max_calls for this token is used up", started
             )
