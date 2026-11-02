@@ -33,6 +33,8 @@ class Runtime:
     models: ModelRouter
     outbox: Outbox
     policy: NamespacePolicy
+    retriever: Any = None  # sre_core.retrieval.Retriever (the simple and complex routes)
+    answerer: Any = None  # sre_core.answer.Answerer (the simple route reuses it)
     agent: ChatAgent | None = None  # built last: the agent depends on the rest
     extras: dict[str, Any] | None = None  # pools, checkpointer, background tasks (T13)
 

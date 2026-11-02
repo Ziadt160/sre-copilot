@@ -10,9 +10,14 @@ factories at fixed paths, which `runtime.build_runtime` calls (T13 owns runtime.
     sre_core.store.factory.make_outbox(pool) -> Outbox                        (T13)
     sre_core.cache.factory.make_answer_cache(pool, settings) -> AnswerCache   (T14)
     sre_core.budget.factory.make_budget_guard(settings) -> BudgetGuard        (T14)
-    sre_core.agent.models.make_model_router(settings) -> ModelRouter          (T14)
+    sre_core.agent.models.make_model_router(settings, *, client_wrapper=None) -> ModelRouter (T14)
+        `client_wrapper(AsyncOpenAI) -> AsyncOpenAI` is how tracing (T16) is added; the module
+        also exports `AllProvidersFailed(RuntimeError)` and `extractive_answer(question, context)
+        -> tuple[str, list[int]]` (quoted passages with [n] markers; the last fallback).
     sre_core.agent.ops_client.make_ops_client(settings) -> OpsClient          (T12)
-    sre_core.agent.factory.make_chat_agent(runtime) -> ChatAgent              (T12)
+    sre_core.agent.factory.make_chat_agent(*, threads, approvals, ops, cache, budget, models,
+        outbox, policy, retriever, answerer, checkpointer, config, settings) -> ChatAgent (T12)
+        Explicit arguments, not the API's Runtime: the agent layer must not import the API.
 
 Rules every implementation keeps:
 * a turn number comes only from `ThreadStore.claim_turn` (an `update ... returning` in the
