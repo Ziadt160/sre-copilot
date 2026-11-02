@@ -209,6 +209,41 @@ async def test_a_good_answer_is_cached_for_the_next_asker() -> None:
     assert kinds(again)[1] == "cache_hit"
 
 
+@pytest.mark.parametrize(
+    ("said", "proposed_pod", "read"),
+    [
+        # Invented (the proposer never sees list_pods): read the deployment it names.
+        ("why is checkout crashing? read its logs", "checkout-7d9f8c6b5-x2k4q", "checkout"),
+        # A workload name in the pod slot ("the checkout pod"): read the deployment.
+        ("logs of the checkout pod please", "checkout", "checkout"),
+        # A real pod name the user wrote is kept.
+        ("logs of checkout-7d9f8c6b5-x2k4q", "checkout-7d9f8c6b5-x2k4q", None),
+    ],
+)
+async def test_a_pod_name_the_user_did_not_write_becomes_a_deployment_read(
+    said: str, proposed_pod: str, read: str | None
+) -> None:
+    h = build(
+        replies={
+            "rewrite": [rewrite(said, "action")],
+            "router": [
+                route("action"),
+                proposal(("get_logs", {"namespace": "shop", "pod": proposed_pod})),
+            ],
+            "answer": ["It panics."],
+        },
+        ops_client=fk.FakeOpsClient(reads={"get_logs": {"text": "panic"}}),
+    )
+    await h.start()
+    await h.turn(said)
+    ((tool, args, _),) = h.ops.calls
+    assert tool == "get_logs"
+    if read is None:
+        assert args["pod"] == proposed_pod and args.get("deployment") is None
+    else:
+        assert args["deployment"] == read and args.get("pod") is None
+
+
 async def test_action_read_runs_at_once_without_approval() -> None:
     h = build(
         replies={

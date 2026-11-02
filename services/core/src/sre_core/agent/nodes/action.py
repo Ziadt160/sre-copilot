@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -51,6 +52,10 @@ CLARIFY_DEFAULT = (
     "(or pod) and say what to do."
 )
 MAX_USER_TURNS_IN_PROPOSAL = 3
+# A ReplicaSet pod name: <deployment>-<pod-template-hash>-<5 characters>.
+_GENERATED_SUFFIX = re.compile(r"-[a-z0-9]{6,10}-[a-z0-9]{5}$")
+# What a real pod name ends with: that suffix, or a StatefulSet ordinal (db-0).
+_POD_NAME_END = re.compile(r"(-[a-z0-9]{6,10}-[a-z0-9]{5}|-[0-9]+)$")
 
 
 def _ids(state: AgentState) -> tuple[uuid.UUID, int]:
@@ -121,8 +126,9 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
                 elif tool not in PROPOSABLE:
                     notes.append(f"Not run: {tool!r} is not a tool I can use.")
                 else:
+                    args = _pods_from_the_user(tool, raw.args, [*earlier, state["message"]])
                     try:
-                        parsed = ops.parse_args(tool, raw.args)
+                        parsed = ops.parse_args(tool, args)
                     except (ValidationError, ValueError):
                         notes.append(f"Not run: the arguments for {tool} were not valid.")
                         continue
@@ -135,7 +141,7 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
                     accepted.append(
                         {
                             "tool": tool,
-                            "args": ops.normalize_args(tool, raw.args),
+                            "args": ops.normalize_args(tool, args),
                             "kind": ops.tool_kind(tool),
                         }
                     )
@@ -145,6 +151,19 @@ def make_action_nodes(ctx: Ctx) -> dict[str, Node]:
             return {"calls": accepted, "notes": notes}
 
         return await ctx.run(state, config, body)
+
+    def _pods_from_the_user(
+        tool: str, args: dict[str, Any], user_text: list[str]
+    ) -> dict[str, Any]:
+        """Keep a pod name only when the user wrote a real one; otherwise it was invented or is
+        a workload name ("the checkout pod"), since the proposer never sees list_pods: read the
+        deployment instead, without a generated suffix."""
+        pod = args.get("pod")
+        if tool != "get_logs" or not isinstance(pod, str) or args.get("deployment"):
+            return args
+        if _POD_NAME_END.search(pod) and any(pod in text for text in user_text):
+            return args
+        return {**args, "pod": None, "deployment": _GENERATED_SUFFIX.sub("", pod)}
 
     def _final(text: str, **extra: Any) -> Update:
         return {

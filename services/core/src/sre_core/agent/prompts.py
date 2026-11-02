@@ -74,6 +74,8 @@ PROPOSAL_SYSTEM_HEAD = f"""\
 You turn the user's request into cluster tool calls. Use only what the user wrote in their own
 messages; if the request is vague or names no target, return no calls and a short clarification
 question. At most {{max_calls}} calls. Use exact Kubernetes names. Never invent a revision number.
+For logs, set `deployment` to the workload the user named; set `pod` only to a full pod name
+copied from the user's message.
 {_DATA_RULE}
 Tools and their arguments (JSON Schema):
 """
