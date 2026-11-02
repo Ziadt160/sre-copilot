@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from sre_core.answer import Answerer, build_answerer
@@ -118,6 +119,13 @@ def create_app(
             await pool.close()
 
     app = FastAPI(title="SRE Copilot core", version="0.1.0", lifespan=lifespan)
+    # The web UI calls the API from its own origin with a bearer token (no cookies).
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_settings().cors_origins,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
     if retriever is not None:
         app.state.retriever = retriever
         app.state.answerer = answerer or build_answerer(retriever)

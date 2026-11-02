@@ -1,8 +1,9 @@
 """The lab rig: the real agent graph (T12) over the real mcp-ops server (T11, simulator backend).
 
 `sre-eval agent run --rig sre_evals.agent.live:lab` (local Ollama model for every agent role and
-the answerer: no quota) or `--rig sre_evals.agent.live:hosted` (config/agent.yaml as it is, with
-its fallback chain: the headline runs).
+the answerer: no quota), `:nvidia` (every role on NVIDIA's gpt-oss-20b, the production model
+family, without touching Groq's quota) or `:hosted` (config/agent.yaml as it is, with its
+fallback chain).
 
 Everything runs in this process. mcp-ops is served over HTTP on a local port, so tokens,
 admission and tasks go through the same stack as in production. The agent's tables and mcp-ops'
@@ -118,12 +119,20 @@ def _planted_chunk(chunk_id: int, body: str) -> RetrievedChunk:
     )  # fmt: skip
 
 
-def lab_config(cfg: AgentConfig) -> AgentConfig:
-    """Every role on the lab model and no hosted fallback (the extractive answer stays last)."""
+NVIDIA_MODEL = "nvidia:openai/gpt-oss-20b"
+
+
+def single_model_config(cfg: AgentConfig, spec: str) -> AgentConfig:
+    """Every role on one model and no fallback provider (the extractive answer stays last), so a
+    run measures that model and spends no other provider's quota."""
     roles: tuple[ModelRole, ...] = get_args(ModelRole)
-    models = cfg.models.model_copy(update=dict.fromkeys(roles, cfg.models.lab))
+    models = cfg.models.model_copy(update=dict.fromkeys(roles, spec))
     fallback = cfg.fallback.model_copy(update={"providers": []})
     return cfg.model_copy(update={"models": models, "fallback": fallback})
+
+
+def lab_config(cfg: AgentConfig) -> AgentConfig:
+    return single_model_config(cfg, cfg.models.lab)
 
 
 @asynccontextmanager
@@ -140,6 +149,9 @@ async def live_rig(models: str = "lab", *, seed: int = 7) -> AsyncIterator[RigFa
         answer_cfg = answer_cfg.model_copy(
             update={"model": cfg.models.lab, "reasoning_effort": None}
         )
+    elif models != "router":  # a provider:model spec for every role and the answerer
+        cfg = single_model_config(cfg, models)
+        answer_cfg = answer_cfg.model_copy(update={"model": models})
     mcp_cfg = load_mcp_ops_config(settings.config_dir)
     policy = mcp_cfg.policy()
 
@@ -193,6 +205,10 @@ async def live_rig(models: str = "lab", *, seed: int = 7) -> AsyncIterator[RigFa
 
 def lab() -> AbstractAsyncContextManager[RigFactory]:
     return live_rig("lab")
+
+
+def nvidia() -> AbstractAsyncContextManager[RigFactory]:
+    return live_rig(NVIDIA_MODEL)
 
 
 def hosted() -> AbstractAsyncContextManager[RigFactory]:

@@ -79,3 +79,15 @@ async def test_bad_params_are_422(client: httpx.AsyncClient, params: dict[str, o
 
 async def test_no_active_corpus_is_503(client: httpx.AsyncClient, db: object) -> None:
     assert (await client.get("/search", params={"q": "pods"})).status_code == 503
+
+
+async def test_the_web_origin_may_call_the_api_and_others_may_not(
+    client: httpx.AsyncClient,
+) -> None:
+    preflight = {"Access-Control-Request-Method": "POST",
+                 "Access-Control-Request-Headers": "authorization,content-type"}  # fmt: skip
+    ok = await client.options("/chat", headers={"Origin": "http://localhost:3000", **preflight})
+    assert ok.status_code == 200
+    assert ok.headers["access-control-allow-origin"] == "http://localhost:3000"
+    other = await client.options("/chat", headers={"Origin": "https://evil.test", **preflight})
+    assert "access-control-allow-origin" not in other.headers

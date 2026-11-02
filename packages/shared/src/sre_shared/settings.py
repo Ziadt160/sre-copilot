@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     supabase_anon_key: SecretStr | None = None
     supabase_service_role_key: SecretStr | None = None
     supabase_jwt_secret: SecretStr | None = None  # verifies Supabase Auth JWTs (HS256)
+    # Browser origins allowed to call the core API (the web UI); a JSON list in the environment.
+    cors_origins: list[str] = ["http://127.0.0.1:3000", "http://localhost:3000"]
 
     # Model providers. Keys are optional: without them dev and CI use local Ollama.
     groq_api_key: SecretStr | None = None
