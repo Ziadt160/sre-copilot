@@ -26,7 +26,7 @@ from sre_evals.answers.label import (
     stratified_sample,
 )
 from sre_evals.answers.testing import FakeJudge
-from sre_shared.llm import ChatClient, MemoryLedger, ModelSpec, QuotaExceeded, today
+from sre_shared.llm import ChatClient, MemoryLedger, ModelSpec, QuotaExceeded
 
 FIXED = datetime(2026, 11, 3, 10, 0, tzinfo=UTC)
 
@@ -214,7 +214,7 @@ class _Exploding:
 def hosted_client(used: int) -> ChatClient:
     spec = ModelSpec("groq", "openai/gpt-oss-120b", "http://127.0.0.1:9", "unused")
     ledger = MemoryLedger()
-    ledger.add(spec.label, today(), used)
+    ledger.add(spec.label, used)
     return ChatClient(spec, ledger=ledger, client=_Exploding(), aclient=_Exploding())
 
 

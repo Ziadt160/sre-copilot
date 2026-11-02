@@ -37,7 +37,7 @@ from sre_evals.answers.stats import (
 )
 from sre_evals.answers.testing import FakeAnswerer, FakeJudge, W, chunk, golden, result
 from sre_evals.runner.config import ExperimentConfig
-from sre_shared.llm import ChatClient, MemoryLedger, ModelSpec, QuotaExceeded, today
+from sre_shared.llm import ChatClient, MemoryLedger, ModelSpec, QuotaExceeded
 from sre_shared.models import ANONYMOUS, AnswerConfig, AnswerRequest, AnswerResult
 
 # -- 1. kappa and accuracy against an independent confusion-matrix computation ------------------
@@ -224,7 +224,7 @@ def _replying_client(replies: dict[str, Any], *, hosted: bool = False, used: int
     else:
         spec = ModelSpec("ollama", "fake-8b", "http://127.0.0.1:9/v1", "ollama")
     ledger = MemoryLedger()
-    ledger.add(spec.label, today(), used)
+    ledger.add(spec.label, used)
     return ChatClient(spec, ledger=ledger, client=SimpleNamespace(),
                       aclient=SimpleNamespace(chat=SimpleNamespace(completions=Completions())))  # fmt: skip
 

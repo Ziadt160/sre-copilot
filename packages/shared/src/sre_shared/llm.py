@@ -3,9 +3,12 @@
 Provider endpoints and per-model daily limits come from `config/limits.yaml`; API keys are
 read from settings by name and never logged. Every call has a timeout, and the OpenAI SDK
 retries 429s, 5xx and connection errors with backoff that honours `retry-after` (chat calls
-have no side effects, so retrying is safe). Hosted models are guarded by a daily token ledger:
-a call that would take a model past `stop_share` of its tokens-per-day is refused before it is
-sent, because the binding free-tier limit is tokens per model per day.
+have no side effects, so retrying is safe). Hosted models are guarded by a token ledger over a
+rolling 24 hours: a call that would take a model past `stop_share` of its tokens-per-day is
+refused before it is sent, because the binding free-tier limit is tokens per model per day.
+Groq counts that day as a rolling window, not a calendar day (2026-11-02: tokens used the
+evening before still counted the next morning, and its count fell minute by minute), so a
+ledger that reset at midnight UTC let runs start that Groq then refused with 429.
 """
 
 from __future__ import annotations
@@ -83,50 +86,87 @@ class QuotaExceeded(RuntimeError):
     """The call would take a hosted model past its share of the daily token limit."""
 
 
+WINDOW_S = 24 * 3600  # tokens-per-day is counted over the last 24 hours (module doc)
+_MERGE_S = 60  # calls within a minute share one ledger entry, so the file stays small
+
+
 class TokenLedger(Protocol):
-    def used(self, label: str, day: str) -> int: ...
-    def add(self, label: str, day: str, tokens: int) -> None: ...
+    def used(self, label: str) -> int: ...
+    def add(self, label: str, tokens: int) -> None: ...
+
+
+def _in_window(entries: Sequence[Sequence[float]], now: float) -> int:
+    return int(sum(n for t, n in entries if now - t < WINDOW_S))
 
 
 class MemoryLedger:
-    """Per-process counts (tests, short scripts)."""
+    """Per-process counts (tests, short scripts), over the same rolling window."""
 
-    def __init__(self) -> None:
-        self._counts: dict[tuple[str, str], int] = {}
+    def __init__(self, clock: Any = time.time) -> None:
+        self._entries: dict[str, list[list[float]]] = {}
+        self._clock = clock
 
-    def used(self, label: str, day: str) -> int:
-        return self._counts.get((label, day), 0)
+    def used(self, label: str) -> int:
+        return _in_window(self._entries.get(label, []), self._clock())
 
-    def add(self, label: str, day: str, tokens: int) -> None:
-        self._counts[(label, day)] = self.used(label, day) + tokens
+    def add(self, label: str, tokens: int) -> None:
+        self._entries.setdefault(label, []).append([self._clock(), float(tokens)])
 
 
 class FileLedger:
-    """Counts in a JSON file shared by lab processes (`data/quota/tokens.json`). Writes are
-    atomic replaces; concurrent processes can undercount slightly, which the 90% stop absorbs.
-    The running API will use Redis counters instead (design doc, budgets)."""
+    """Counts in a JSON file shared by lab processes (`data/quota/tokens.json`):
+    `{"window_s": 86400, "entries": {label: [[unix_time, tokens], ...]}}`, entries older than the
+    window dropped on every write. Writes are atomic replaces; concurrent processes can
+    undercount slightly, which the 90% stop absorbs. The running API will use Redis counters
+    instead (design doc, budgets). A file in the old per-calendar-day format is converted on
+    first read, conservatively: today's totals dated then, an earlier day's dated at its end."""
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(self, path: Path | None = None, clock: Any = time.time) -> None:
         self.path = path or get_settings().data_dir / "quota" / "tokens.json"
+        self._clock = clock
 
-    def _read(self) -> dict[str, dict[str, int]]:
+    def _read(self) -> dict[str, list[list[float]]]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-        return data if isinstance(data, dict) else {}
+        if not isinstance(data, dict):
+            return {}
+        if "entries" in data:
+            return {k: [list(e) for e in v] for k, v in data["entries"].items()}
+        now = self._clock()
+        day_now = datetime.fromtimestamp(now, UTC).strftime("%Y-%m-%d")
+        out: dict[str, list[list[float]]] = {}
+        for day, counts in data.items():  # old format: {"YYYY-MM-DD": {label: tokens}}
+            try:
+                end = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=UTC).timestamp() + 86400
+            except (TypeError, ValueError):
+                continue
+            at = now if day == day_now else min(end, now)
+            for label, n in (counts or {}).items():
+                out.setdefault(label, []).append([at, float(n)])
+        self._write(out)  # dated once: a re-read must not move "now" forward
+        return out
 
-    def used(self, label: str, day: str) -> int:
-        return int(self._read().get(day, {}).get(label, 0))
+    def used(self, label: str) -> int:
+        return _in_window(self._read().get(label, []), self._clock())
 
-    def add(self, label: str, day: str, tokens: int) -> None:
-        data = self._read()
-        data = {d: v for d, v in data.items() if d >= day}  # keep today only
-        data.setdefault(day, {})[label] = int(data.get(day, {}).get(label, 0)) + tokens
+    def add(self, label: str, tokens: int) -> None:
+        now = self._clock()
+        entries = {k: [e for e in v if now - e[0] < WINDOW_S] for k, v in self._read().items()}
+        mine = entries.setdefault(label, [])
+        if mine and now - mine[-1][0] < _MERGE_S:
+            mine[-1][1] += tokens
+        else:
+            mine.append([now, float(tokens)])
+        self._write(entries)
+
+    def _write(self, entries: dict[str, list[list[float]]]) -> None:
+        data = {"window_s": WINDOW_S, "entries": {k: v for k, v in entries.items() if v}}
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-            json.dump(data, f, indent=2, sort_keys=True)
+            json.dump(data, f, indent=1, sort_keys=True)
         os.replace(tmp, self.path)
 
 
@@ -209,19 +249,19 @@ class ChatClient:
         """Tokens left before the stop share, or None when the model has no daily limit."""
         if self.tpd is None:
             return None
-        return int(self.tpd * self.stop_share) - self.ledger.used(self.spec.label, today())
+        return int(self.tpd * self.stop_share) - self.ledger.used(self.spec.label)
 
     def check_quota(self, planned_tokens: int) -> None:
         left = self.remaining_tokens()
         if left is not None and planned_tokens > left:
             raise QuotaExceeded(
-                f"{self.spec.label}: {planned_tokens} planned tokens > {left} left today "
+                f"{self.spec.label}: {planned_tokens} planned tokens > {left} left in the last 24 h "
                 f"({self.stop_share:.0%} of {self.tpd} tokens/day)"
             )
 
     def _record(self, result: ChatResult) -> None:
         if self.spec.hosted:
-            self.ledger.add(self.spec.label, today(), result.total_tokens)
+            self.ledger.add(self.spec.label, result.total_tokens)
 
     # -- calls --------------------------------------------------------------------------
 
@@ -319,4 +359,4 @@ class ChatClient:
                 yield delta
         if self.spec.hosted:
             prompt = sum(len(m.get("content", "")) for m in messages) // CHARS_PER_TOKEN
-            self.ledger.add(self.spec.label, today(), prompt + len("".join(out)) // CHARS_PER_TOKEN)
+            self.ledger.add(self.spec.label, prompt + len("".join(out)) // CHARS_PER_TOKEN)

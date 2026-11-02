@@ -20,7 +20,7 @@ from sre_evals.answers.judge import (
 )
 from sre_evals.cli import app
 from sre_evals.runner.testing import W
-from sre_shared.llm import ChatClient, MemoryLedger, ModelSpec, QuotaExceeded, today
+from sre_shared.llm import ChatClient, MemoryLedger, ModelSpec, QuotaExceeded
 from sre_shared.models import GoldenItem
 
 SPEC = ModelSpec("ollama", "fake-8b", "http://127.0.0.1:9/v1", "ollama")
@@ -130,7 +130,7 @@ def test_chat_client_llm_sync_generate_parses_schema_and_plain_text() -> None:
 def test_check_judge_budget_refuses_over_budget_hosted_judge() -> None:
     spec = ModelSpec("groq", "openai/gpt-oss-120b", "http://127.0.0.1:9", "k")
     ledger = MemoryLedger()
-    ledger.add(spec.label, today(), 170_000)  # 180000 usable -> 10000 left
+    ledger.add(spec.label, 170_000)  # 180000 usable -> 10000 left
     client = ChatClient(spec, ledger=ledger, client=object(), aclient=object())
     check_judge_budget(client, 9_000)
     with pytest.raises(QuotaExceeded):
@@ -177,7 +177,7 @@ def test_run_refuses_an_over_budget_hosted_judge_before_any_database_or_model_ca
 ) -> None:
     spec = ModelSpec("groq", "openai/gpt-oss-120b", "http://127.0.0.1:9", "k")
     ledger = MemoryLedger()
-    ledger.add(spec.label, today(), 179_990)
+    ledger.add(spec.label, 179_990)
     client = ChatClient(spec, ledger=ledger, client=object(), aclient=object())
     monkeypatch.setattr(answers_cli, "_client", lambda s: client)
     items = [

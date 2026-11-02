@@ -18,7 +18,6 @@ from sre_shared.llm import (
     QuotaExceeded,
     UnknownModelError,
     estimate_tokens,
-    today,
 )
 
 LIMITS = Limits(
@@ -100,9 +99,9 @@ async def test_reasoning_effort_is_sent_only_when_set() -> None:
 
 def test_quota_guard_refuses_before_sending() -> None:
     ledger = MemoryLedger()
-    ledger.add("groq:m", today(), 880)
+    ledger.add("groq:m", 880)
     c, fake = client(GROQ, ledger)
-    with pytest.raises(QuotaExceeded, match="left today"):
+    with pytest.raises(QuotaExceeded, match="left in the last 24 h"):
         c.complete([{"role": "user", "content": "x" * 400}], max_tokens=10)
     assert fake.calls == []  # nothing was sent
 
@@ -124,16 +123,51 @@ def test_estimate_tokens() -> None:
     assert estimate_tokens([{"role": "user", "content": "abcd" * 10}], 7) == 17
 
 
-def test_file_ledger_keeps_only_today(tmp_path: Path) -> None:
+class Clock:
+    def __init__(self, t: float) -> None:
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def test_file_ledger_counts_a_rolling_24_hours(tmp_path: Path) -> None:
+    # Groq's tokens-per-day is a rolling window: usage from the evening before still counted
+    # the next morning (2026-11-02). Midnight must not reset the count.
     path = tmp_path / "q" / "tokens.json"
-    path.parent.mkdir()
-    path.write_text(json.dumps({"2000-01-01": {"groq:m": 5}}), encoding="utf-8")
-    ledger = FileLedger(path)
-    ledger.add("groq:m", today(), 30)
-    ledger.add("groq:m", today(), 12)
-    assert ledger.used("groq:m", today()) == 42
-    assert list(json.loads(path.read_text(encoding="utf-8"))) == [today()]
-    assert FileLedger(tmp_path / "missing.json").used("groq:m", today()) == 0
+    clock = Clock(1_000_000.0)
+    ledger = FileLedger(path, clock=clock)
+    ledger.add("groq:m", 30)
+    clock.t += 30  # same minute: one entry
+    ledger.add("groq:m", 12)
+    assert ledger.used("groq:m") == 42
+    assert len(json.loads(path.read_text(encoding="utf-8"))["entries"]["groq:m"]) == 1
+    clock.t += 12 * 3600  # across a midnight
+    ledger.add("groq:m", 100)
+    assert ledger.used("groq:m") == 142
+    clock.t += 12 * 3600 + 60  # the first entry is now older than 24 h
+    assert ledger.used("groq:m") == 100
+    ledger.add("groq:n", 1)  # a write drops expired entries from the file
+    assert json.loads(path.read_text(encoding="utf-8"))["entries"]["groq:m"] == [
+        [1_000_000.0 + 30 + 12 * 3600, 100.0]
+    ]
+    assert FileLedger(tmp_path / "missing.json").used("groq:m") == 0
+
+
+def test_an_old_calendar_day_ledger_is_read_conservatively(tmp_path: Path) -> None:
+    path = tmp_path / "tokens.json"
+    now = 1_762_056_000.0  # 2025-11-02 04:00 UTC
+    path.write_text(
+        json.dumps({"2025-11-01": {"groq:m": 167}, "2025-11-02": {"groq:m": 131}}),
+        encoding="utf-8",
+    )
+    clock = Clock(now)
+    ledger = FileLedger(path, clock=clock)
+    assert ledger.used("groq:m") == 298  # yesterday still counts, as Groq counted it
+    clock.t = now + 20 * 3600 + 1  # yesterday's total, dated its end (midnight), has expired
+    assert ledger.used("groq:m") == 131
+    clock.t = now + 24 * 3600 + 1  # today's, dated when it was read, has too
+    assert ledger.used("groq:m") == 0
 
 
 def test_hosted_model_without_a_daily_limit_is_refused() -> None:
