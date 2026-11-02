@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from sre_core.agent.ports import OpsClient
 from sre_core.agent.testing import MemoryApprovalStore, MemoryThreadStore, new_approval
 from sre_evals.agent.cluster import FakeCluster
 from sre_evals.agent.items import AgentItem
@@ -81,7 +82,7 @@ class ClusterOps:
 class DroppedReplyOps:
     """Fault: every write is sent twice and the first reply is lost on the way back."""
 
-    def __init__(self, inner: ClusterOps) -> None:
+    def __init__(self, inner: OpsClient) -> None:
         self.inner = inner
 
     async def read(self, tool: str, args: Mapping[str, Any], token: str) -> dict[str, Any]:

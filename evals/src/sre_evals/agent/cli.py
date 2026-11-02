@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import json
+from contextlib import AbstractAsyncContextManager, AsyncExitStack
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
@@ -38,9 +39,12 @@ def _golden() -> dict[str, GoldenItem]:
     return {g.id: g for g in load_golden(golden_path("v1"))}
 
 
-def _rig_factory(spec: str, golden: dict[str, GoldenItem]) -> RigFactory:
+def _rig_factory(
+    spec: str, golden: dict[str, GoldenItem]
+) -> RigFactory | AbstractAsyncContextManager[RigFactory]:
     """`fake` is the oracle agent over a fake cluster (CI). `module:function` is a callable
-    returning a RigFactory; the lab wires the real agent and simulator there."""
+    returning a RigFactory, or an async context manager yielding one when the rig holds
+    resources (the lab rig in `sre_evals.agent.live` opens a database and a server)."""
     if spec == "fake":
         mcp = load_mcp_ops_config()
         return make_fake_rig_factory(
@@ -95,17 +99,20 @@ def run_cmd(
     cfg = AgentRunConfig(name=AGENT_GOLDEN_VERSION, subset=subset, seed=seed, rig=rig)
 
     async def go() -> Any:
-        conn = None
-        if store:
-            conn = await connect(database_url or get_settings().database_url, autocommit=True)
-        try:
+        async with AsyncExitStack() as stack:
+            rig_factory = (
+                await stack.enter_async_context(factory)
+                if isinstance(factory, AbstractAsyncContextManager)
+                else factory
+            )
+            conn = None
+            if store:
+                conn = await connect(database_url or get_settings().database_url, autocommit=True)
+                stack.push_async_callback(conn.close)
             return await run_agent_evals(
-                chosen, factory, golden, cfg=cfg, faults=plan, conn=conn, loop=loop,
+                chosen, rig_factory, golden, cfg=cfg, faults=plan, conn=conn, loop=loop,
                 golden_version=item_set_version(path),
             )  # fmt: skip
-        finally:
-            if conn is not None:
-                await conn.close()
 
     result = run(go())
     s: dict[str, Any] = result.summary
