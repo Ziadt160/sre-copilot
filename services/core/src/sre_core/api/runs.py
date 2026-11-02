@@ -178,6 +178,11 @@ class RunManager:
         ]:
             del self._runs[tid]
 
+    async def idle(self) -> None:
+        """Wait until every run started so far has finished (tests, orderly shutdown)."""
+        while self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+
     async def close(self) -> None:
         for task in list(self._tasks):
             task.cancel()
