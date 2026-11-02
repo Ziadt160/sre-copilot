@@ -46,7 +46,10 @@ from sre_shared.llm import ChatClient
 # v4: the check sees the whole passage the quote comes from and accepts a paraphrase or two
 # sentences taken together, as the rubric does. v3's one-sentence check caught 4 of the 5
 # flagged answers on run 10 but turned 6 to 10 of ~22 supported ones (kappa 0.04-0.29).
-RUBRIC_PROMPT_VERSION = "judge-rubric-v4"
+# v5: v4's prompts; quotes are matched ignoring formatting (`quote_coverage`). Through v4 a
+# quote that dropped a code fence, backticks or a colon was "not found", and 5 of v4's 7 wrong
+# flags on run 10 came from that, not from the model.
+RUBRIC_PROMPT_VERSION = "judge-rubric-v5"
 EVIDENCE_MIN_COVERAGE = 0.5  # the gold-matching rule: half the quote's 5-grams in one source
 RUBRIC_MAX_TOKENS = 3072  # the claim list, plus hidden reasoning on reasoning models
 VERIFY_MAX_TOKENS = 800  # one word, plus hidden reasoning on reasoning models
@@ -111,23 +114,59 @@ class RubricReply(BaseModel):
     claims: list[ClaimVerdict]
 
 
-def evidence_found(evidence: str, contexts: Sequence[str]) -> bool:
-    """The quote is really in a source: at least half its word 5-grams in one passage."""
-    from sre_evals.metrics.core import coverage
+_FENCE_MARK = re.compile(r"```[\w+-]*")  # a code fence and its language tag
+# Typographic quotes, dashes and no-break spaces, as code points (they look like ASCII).
+_QUOTE_CHARS = {0x201C: '"', 0x201D: '"', 0x2018: "'", 0x2019: "'",
+                0x2011: "-", 0x2013: "-", 0x2014: "-", 0x00A0: " "}  # fmt: skip
+_ELLIPSIS = re.compile(r"\.\.\.|" + chr(0x2026))
+_N = 5
 
-    return bool(evidence.strip()) and any(
-        coverage(c, evidence) >= EVIDENCE_MIN_COVERAGE for c in contexts
-    )
+
+def quote_words(text: str) -> list[str]:
+    """Words of `text` with formatting dropped: case, code fences, backticks and other markup,
+    typographic quotes and dashes, and punctuation at word edges. Dots, hyphens and slashes
+    inside a word stay (`spec.volumeAttributesClassName`), and so do a flag's leading dashes
+    (`--log-file-max-size`)."""
+    text = _FENCE_MARK.sub(" ", text.translate(_QUOTE_CHARS).lower())
+    words = (t.strip(".:/'\"").rstrip("-") for t in re.split(r"[^\w.\-/:'\"]+", text))
+    return [w for w in words if w.strip("-")]
+
+
+def quote_coverage(passage: str, quote: str) -> float:
+    """Share of the quote found in `passage`, formatting ignored: word 5-grams (the gold-
+    matching rule) for each part of a quote cut with "...", the parts weighted by length; a part
+    shorter than five words must appear as a whole."""
+    p = quote_words(passage)
+    p_text, p_grams = f" {' '.join(p)} ", {tuple(p[i : i + _N]) for i in range(len(p) - _N + 1)}
+    found = total = 0
+    for part in (quote_words(x) for x in _ELLIPSIS.split(quote)):
+        if not part:
+            continue
+        if len(part) < _N:
+            total += 1
+            found += f" {' '.join(part)} " in p_text
+            continue
+        grams = {tuple(part[i : i + _N]) for i in range(len(part) - _N + 1)}
+        total += len(grams)
+        found += len(grams & p_grams)
+    return found / total if total else 0.0
+
+
+def evidence_found(evidence: str, contexts: Sequence[str]) -> bool:
+    """The quote is really in a source: at least half of it (`quote_coverage`) in one passage."""
+    return passage_of(evidence, contexts) is not None
 
 
 def passage_of(evidence: str, contexts: Sequence[str]) -> str | None:
-    """The passage the quote comes from (best 5-gram coverage, at least the evidence rule)."""
-    from sre_evals.metrics.core import coverage
-
+    """The passage the quote comes from (best `quote_coverage`, at least the evidence rule);
+    all passages together when the quote joins sentences of two of them (fac-0011)."""
     if not evidence.strip() or not contexts:
         return None
-    best = max(contexts, key=lambda c: coverage(c, evidence))
-    return best if coverage(best, evidence) >= EVIDENCE_MIN_COVERAGE else None
+    cov, best = max(((quote_coverage(c, evidence), c) for c in contexts), key=lambda t: t[0])
+    if cov >= EVIDENCE_MIN_COVERAGE:
+        return best
+    joined = "\n\n".join(contexts)
+    return joined if quote_coverage(joined, evidence) >= EVIDENCE_MIN_COVERAGE else None
 
 
 def checked(reply: RubricReply, contexts: Sequence[str]) -> tuple[RubricReply, int]:

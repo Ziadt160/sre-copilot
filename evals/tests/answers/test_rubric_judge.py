@@ -19,6 +19,8 @@ from sre_evals.answers.rubric_judge import (
     build_messages,
     parse_check,
     passage_of,
+    quote_coverage,
+    quote_words,
     score_reply,
 )
 from sre_evals.answers.stats import score_to_label
@@ -216,3 +218,34 @@ async def test_the_check_sees_the_passage_the_quote_comes_from() -> None:
     assert "Services and ports" not in prompt  # only the passage the quote is in
     assert "directly implied" in prompt and "Watch negations" in prompt
     assert passage_of("not in any passage at all here", passages) is None
+
+
+def test_quotes_match_whatever_the_formatting() -> None:
+    # Real misses through v4 (run 10): the judge dropped a code fence, or typographic quotes,
+    # or cut the quote with an ellipsis; the words were in the source all along.
+    src = (
+        "To see why, view the Pod events:\n\n```shell\nkubectl describe pod private-reg\n```\n"
+        "The container that is terminated (“OOMKilled”) does not clean up the rules. "
+        "Set `spec.volumeAttributesClassName` to the new class and apply it."
+    )
+    assert quote_coverage(src, "view the Pod events: kubectl describe pod private-reg") == 1.0
+    assert (
+        quote_coverage(src, 'The container that is terminated ("OOMKilled") does not clean') == 1.0
+    )
+    assert (
+        quote_coverage(src, "Set spec.volumeAttributesClassName to the new class ... apply it")
+        == 1.0
+    )
+    assert quote_coverage(src, "SET SPEC.VOLUMEATTRIBUTESCLASSNAME TO THE NEW CLASS") == 1.0
+    assert quote_coverage(src, "the rules are recreated when the pod restarts") == 0.0
+    assert quote_words("`--log-file-max-size` flag.") == ["--log-file-max-size", "flag"]
+
+
+def test_a_quote_joining_two_passages_is_found_in_both_together() -> None:
+    a = "In order to extract the best performance, optimizations related to locality are required."
+    # 13 words each: neither passage alone holds half the quote's 5-grams.
+    b = "This can result in undesirable allocations on multiple-socketed systems for latency sensitive apps."
+    quote = f"{a} {b}"
+    assert quote_coverage(a, quote) < 0.5 and quote_coverage(b, quote) < 0.5
+    assert passage_of(quote, [a, b]) == f"{a}\n\n{b}"
+    assert passage_of(a, [a, b]) == a  # one passage when one holds it
