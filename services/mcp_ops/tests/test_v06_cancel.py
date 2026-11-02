@@ -38,11 +38,6 @@ def backend() -> GatedSim:
     return GatedSim()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-4: tasks/cancel on a write task that already claimed its row cancels the body "
-    "and leaves the operation 'running' until a process restart",
-)
 async def test_a_client_cancel_mid_write_does_not_strand_the_operation(
     rig: Rig, backend: GatedSim
 ) -> None:

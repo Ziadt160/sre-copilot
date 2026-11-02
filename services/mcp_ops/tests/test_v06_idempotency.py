@@ -116,12 +116,6 @@ async def test_a_redelivery_while_the_first_body_is_inside_the_backend(
     assert len(sim.mutation_log()) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-4: a task body cancelled after it won the claim (tasks/cancel, a dropped plain "
-    "call) leaves the row 'running' with nobody running it; only a process restart settles it, "
-    "and every retry until then waits 5 s and reports 'running'",
-)
 async def test_a_cancelled_task_body_does_not_strand_the_operation(
     rig: Rig, gated: tuple[GatedSim, OpsService]
 ) -> None:
@@ -137,13 +131,6 @@ async def test_a_cancelled_task_body_does_not_strand_the_operation(
     assert row["status"] != "running"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-5: the startup reconciler settles every 'running' row, including one a still-live "
-    "instance is executing (rolling deploy: the new pod starts while the old one finishes a "
-    "task); it records 'failed: interrupted before the change was applied', the old instance "
-    "then applies the change, and the audit row stays 'failed' for an applied write",
-)
 async def test_a_reconciler_on_a_new_instance_does_not_misrecord_a_live_write(
     rig: Rig, gated: tuple[GatedSim, OpsService]
 ) -> None:
@@ -159,18 +146,16 @@ async def test_a_reconciler_on_a_new_instance_does_not_misrecord_a_live_write(
     assert row["status"] == view["status"] == "succeeded"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="V06-6: an escalate-route create_incident whose token names a thread with no row "
-    "(deleted between minting and the call) fails the incidents foreign key inside finish(); "
-    "the operation is left 'running' until a restart instead of ending 'failed'",
-)
 async def test_an_incident_for_a_vanished_thread_ends_failed_not_running(
     rig: Rig, sim: SimulatorBackend
 ) -> None:
     args = {"severity": "sev3", "title": "web slow", "summary": "p99 up"}
     with pytest.raises(ToolError):
-        await rig.write("create_incident", args, rig.token(thread_id=uuid.uuid4()))
+        await rig.write(
+            "create_incident",
+            args,
+            rig.token(thread_id=uuid.uuid4(), tools=("create_incident", "page_oncall")),
+        )
     (row,) = await rig.rows("kind = 'escalation'")
     assert sim.mutation_log() == []
     assert row["status"] == "failed"
@@ -183,7 +168,7 @@ async def test_the_reconciler_never_reruns_and_a_retry_after_it_never_reruns(
     (row,) = await rig.rows("kind = 'write'")
     await rig.store.claim(row["id"], "dead")
     for _ in range(3):  # several restarts in a row
-        await reconcile(rig.store, sim)
+        await reconcile(rig.store, sim, min_age_s=0)
     for _ in range(2):
         out = await rig.service.execute(claims, "restart_deployment", dict(WEB), "retry")
         assert out["status"] == "failed" and out["replayed"] is True
