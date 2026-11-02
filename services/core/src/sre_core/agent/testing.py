@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from sre_core.agent.ports import (
+from sre_core.ports import (
     BudgetExceeded,
     CachedAnswer,
     MessageRecord,

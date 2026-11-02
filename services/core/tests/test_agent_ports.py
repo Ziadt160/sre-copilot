@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sre_core.agent import ports
+from sre_core import ports
 from sre_core.agent import testing as fk
 from sre_shared.contracts import agent as ev
 from sre_shared.contracts import ops
