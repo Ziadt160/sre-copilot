@@ -36,18 +36,31 @@ class CorpusStatus(StrEnum):
 # --- identity -----------------------------------------------------------------------
 
 
+Scope = Literal["viewer", "operator", "admin"]
+"""viewer reads; operator also writes with approval; admin approves high-risk writes."""
+
+
 class Claims(BaseModel):
     """The caller's identity as RLS sees it (`request.jwt.claims`).
 
-    `groups` lands in `app_metadata.groups`; every caller can also read the `public` group.
+    `groups`, `scopes` and `namespaces` land in `app_metadata`; every caller can also read the
+    `public` group. `namespaces` are the ones the user may act in (mcp-ops intersects them with
+    its own allow-list); scopes and namespaces are set by an admin, never by the user.
     """
 
     sub: str
     role: Literal["anon", "authenticated"] = "authenticated"
     groups: list[str] = Field(default_factory=list)
+    scopes: list[Scope] = Field(default_factory=list)
+    namespaces: list[str] = Field(default_factory=list)
 
     def to_jwt_claims(self) -> dict[str, Any]:
-        return {"sub": self.sub, "role": self.role, "app_metadata": {"groups": self.groups}}
+        meta: dict[str, Any] = {"groups": self.groups}
+        if self.scopes:
+            meta["scopes"] = list(self.scopes)
+        if self.namespaces:
+            meta["namespaces"] = self.namespaces
+        return {"sub": self.sub, "role": self.role, "app_metadata": meta}
 
 
 ANONYMOUS = Claims(sub="anonymous", role="anon")

@@ -28,6 +28,20 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 DATA_TABLES = (
+    # Phase 3 agent tables (truncate cascades through their foreign keys)
+    "semantic_cache",
+    "review_labels",
+    "ui_events",
+    "feedback_sources",
+    "feedback",
+    "outbox",
+    "pages",
+    "incidents",
+    "operations",
+    "approvals",
+    "messages",
+    "threads",
+    # Phases 1-2
     "eval_scores",
     "eval_runs",
     "embedding_cache",

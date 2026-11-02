@@ -1,0 +1,24 @@
+[project]
+name = "sre-mcp-ops"
+version = "0.1.0"
+description = "SRE Copilot mcp-ops: FastMCP server for cluster tools, scopes, approvals, idempotency and audit."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "sre-shared",
+    # Pinned together: fastmcp-tasks requires the same fastmcp-slim patch (checked 2026-11-02).
+    "fastmcp[tasks]==4.1.5",
+    "uvicorn[standard]>=0.32",
+    "pyjwt>=2.9",
+    "redis>=8.0,<8.1",  # fastmcp-tasks excludes redis 8.1.0
+]
+
+[project.optional-dependencies]
+# The kind backend runs in CI only (the lab uses the simulator; see config/mcp_ops.yaml).
+kind = ["kubernetes==37.0.1"]
+
+[project.scripts]
+sre-mcp-ops = "sre_mcp_ops.server:run"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"

@@ -44,6 +44,17 @@ def claims_from_authorization(authorization: str | None) -> Claims:
     app_metadata = payload.get("app_metadata") or {}
     if not isinstance(app_metadata, dict):
         raise HTTPException(status_code=401, detail="malformed app_metadata claim")
-    raw_groups = app_metadata.get("groups") or []
-    groups = [g for g in raw_groups if isinstance(g, str)] if isinstance(raw_groups, list) else []
-    return Claims(sub=sub, role="authenticated", groups=groups)
+
+    def strings(key: str) -> list[str]:
+        raw = app_metadata.get(key) or []
+        return [x for x in raw if isinstance(x, str)] if isinstance(raw, list) else []
+
+    # Unknown scope names are dropped, never widened: only an admin sets app_metadata.
+    scopes = [s for s in strings("scopes") if s in ("viewer", "operator", "admin")]
+    return Claims(
+        sub=sub,
+        role="authenticated",
+        groups=strings("groups"),
+        scopes=scopes,  # filtered to the Scope literals above
+        namespaces=strings("namespaces"),
+    )
