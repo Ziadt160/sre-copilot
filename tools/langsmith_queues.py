@@ -46,7 +46,9 @@ Use the comment box for what was wrong. Add a correction when you know the right
 """
 
 # Feedback written by the app is `user_rating` (1 = up, 0 = down); see sre_core.review.feedback_sync.
-_FILTER_THUMBS_DOWN = 'and(eq(is_root, true), eq(feedback_key, "user_rating"), eq(feedback_score, 0))'
+_FILTER_THUMBS_DOWN = (
+    'and(eq(is_root, true), eq(feedback_key, "user_rating"), eq(feedback_score, 0))'
+)
 _FILTER_SAMPLE = "eq(is_root, true)"
 
 

@@ -41,8 +41,7 @@ def _send(client: Any, payload: Mapping[str, Any]) -> str:
     score = 1 if int(payload["rating"]) > 0 else 0
     comment = payload.get("reason") or None
     existing = {
-        str(f.id): f
-        for f in client.list_feedback(run_ids=[run_id], feedback_key=[FEEDBACK_KEY])
+        str(f.id): f for f in client.list_feedback(run_ids=[run_id], feedback_key=[FEEDBACK_KEY])
     }
     if str(fid) in existing:
         old = existing[str(fid)]

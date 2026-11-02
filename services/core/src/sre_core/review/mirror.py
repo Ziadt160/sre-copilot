@@ -70,12 +70,12 @@ def _sync_fetch(client: Any, queue_name: str) -> list[tuple[str, list[Any]]]:
     """(run id, human feedback) for every completed queue item. Synchronous SDK calls."""
     queue = next(iter(client.list_annotation_queues(name=queue_name)), None)
     if queue is None:
-        raise SystemExit(f"annotation queue {queue_name!r} not found; run tools/langsmith_queues.py")
+        raise SystemExit(
+            f"annotation queue {queue_name!r} not found; run tools/langsmith_queues.py"
+        )
     out: list[tuple[str, list[Any]]] = []
     for run in client.list_runs_from_annotation_queue(queue.id, status="completed"):
-        feedback = list(
-            client.list_feedback(run_ids=[run.id], feedback_source_type=HUMAN_SOURCES)
-        )
+        feedback = list(client.list_feedback(run_ids=[run.id], feedback_source_type=HUMAN_SOURCES))
         out.append((str(run.id), feedback))
     return out
 
@@ -116,7 +116,9 @@ async def _main(queue_name: str, client_factory: Callable[[str], Any]) -> Mirror
         raise SystemExit("LANGSMITH_API_KEY is not set")
     conn = await connect()
     try:
-        return await mirror_labels(conn, client_factory(key.get_secret_value()), queue_name=queue_name)
+        return await mirror_labels(
+            conn, client_factory(key.get_secret_value()), queue_name=queue_name
+        )
     finally:
         await conn.close()
 
