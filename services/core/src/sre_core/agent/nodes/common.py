@@ -160,6 +160,12 @@ class Ctx:
             raise RuntimeError("the graph was invoked without claims")
         return claims
 
+    @staticmethod
+    def approver(config: RunnableConfig) -> Claims:
+        """Who decided an approval (the resume caller); the requester when none is set."""
+        a = config.get("configurable", {}).get("approver")
+        return a if isinstance(a, Claims) else Ctx.claims(config)
+
     # -- guarded node body ---------------------------------------------------------------
 
     async def run(

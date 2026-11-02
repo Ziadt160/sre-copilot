@@ -14,6 +14,7 @@ class AgentState(TypedDict, total=False):
     thread_id: str
     turn: int
     message: str  # the user's raw message
+    requester: dict[str, Any]  # the asking user's claims (no token), kept for resumes
     # conversation context
     history: list[dict[str, Any]]  # earlier turns, oldest first: {turn, role, content}
     summary: str | None

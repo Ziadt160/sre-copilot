@@ -47,9 +47,15 @@ class LangGraphChatAgent:
         self._graph = build_graph(ctx, checkpointer)
         self._locks: defaultdict[uuid.UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    def _config(self, claims: Claims, thread_id: uuid.UUID) -> Any:
+    def _config(self, claims: Claims, thread_id: uuid.UUID, approver: Claims | None = None) -> Any:
+        """`claims` is who the turn runs as (the requester); `approver` is used only to check an
+        approval."""
         return {
-            "configurable": {"thread_id": str(thread_id), "claims": claims},
+            "configurable": {
+                "thread_id": str(thread_id),
+                "claims": claims,
+                "approver": approver or claims,
+            },
             "recursion_limit": self._ctx.cfg.limits.recursion_limit,
         }
 
@@ -73,6 +79,7 @@ class LangGraphChatAgent:
         yield TurnEvent(thread_id=thread_id, turn=turn)
         async with self._locks[thread_id]:
             graph_input = new_turn_input(str(thread_id), turn, message)
+            graph_input["requester"] = claims.model_dump(mode="json")
             async for event in self._drive(graph_input, self._config(claims, thread_id)):
                 yield event
 
@@ -83,8 +90,11 @@ class LangGraphChatAgent:
         graph must be waiting on that exact approval, and the decision is the one stored in the
         ApprovalStore (a forged status in `approval` changes nothing)."""
         async with self._locks[thread_id]:
-            config = self._config(claims, thread_id)
-            snapshot = await self._graph.aget_state(config)
+            snapshot = await self._graph.aget_state(self._config(claims, thread_id))
+            saved = snapshot.values.get("requester")
+            # Run the rest of the turn as the user who asked, not as the approver.
+            requester = Claims.model_validate(saved) if saved else claims
+            config = self._config(requester, thread_id, approver=claims)
             waiting = [i.value for t in snapshot.tasks for i in t.interrupts]
             if not any(
                 isinstance(v, dict) and v.get("approval_id") == str(approval.id) for v in waiting
