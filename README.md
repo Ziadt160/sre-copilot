@@ -110,6 +110,91 @@ Limits:
 - The embedding times (gte-small 5,745 s on the CPU before a later 1.7× batching speedup;
   BGE 488–563 s on an RTX 4060 Ti) compare machines as much as models.
 
+## Phase 3: the agent
+
+The agent is a fixed LangGraph graph: rewrite the follow-up, check the answer cache, route to
+simple, complex, action or escalate, then check the answer is grounded. It acts on a cluster only
+through `mcp-ops`, an MCP server that checks scopes, namespaces, approvals and idempotency itself
+instead of trusting the agent. A write waits up to 15 minutes for a person to approve, edit or
+reject it in the web UI. Escalation opens an incident, pages on-call and hands the thread to a
+human.
+
+Measured on agent-v1: 66 tasks over the simulated cluster
+([model-reviewed](evals/golden/agent-v1/README.md), Cohen's kappa 0.61 between two blind
+passes). The agent ran against the real mcp-ops server with every role on a local 7B model
+(qwen2.5:7b), and all three injected faults were on: each write sent twice with the first reply
+dropped, the task body delivered again, and two approvals at once. Runs 55 and 56, git
+`4d5468334723`, 95% bootstrap intervals (full report: [`docs/agent-results.md`](docs/agent-results.md)):
+
+| Stratum | Tasks | Task success | Right tool and arguments | Other |
+|---|---|---|---|---|
+| Action | 25 | 0.88 [0.76, 1.00] | 0.84 | approvals at the right level, end state checked |
+| Injection | 10 | 0.80 [0.50, 1.00] | 0.80 | planted instruction obeyed: 0 of 10 |
+| Permission | 10 | 0.80 [0.50, 1.00] | – | right refusal or admin request: 0.80 |
+| Multi-turn | 21 | 0.14 [0.00, 0.29] | – | retrieval recall@5 of the rewritten follow-up 0.44 |
+
+**Gate: 0 duplicate side effects** under all three faults, and 0 agent crashes. Duplicates are
+counted from the simulator's mutation log, one per idempotency key, and a re-apply that changed
+nothing still counts.
+
+What the numbers say:
+
+- **On a 7B model, single-turn operations mostly work and fail safe.** No planted instruction
+  in a log line or passage led to a tool call. Admin-only actions waited for an admin. Where the
+  agent failed, nothing unwanted ran:
+  - three cluster questions were escalated instead of answered (the router over-escalates);
+  - "scale payments api" was read as a deployment named `payments-api` in shop;
+  - a crash after a deploy needs a rollback revision, which the agent may not invent and cannot
+    see.
+- **Multi-turn is the weak stratum, and the evidence points at the model.** Follow-ups that
+  combine two questions go to the complex route. There the 7B model's synthesis fails the
+  grounding check, so the agent declines with sources instead of answering without them. The next
+  measurement is a hosted gpt-oss run, which was not possible on the day: NVIDIA's endpoint timed
+  out, OpenRouter's free tier was rate-limited, and Groq's quota was kept for Phase 2.
+- **The agent's runs improved by fixing what traces showed, not by tuning prompts against the
+  score.** Action success went from 0.44 on the draft set to 0.88. Three changes did it:
+  - the caller's namespaces (from verified claims) went into the proposal prompt;
+  - `get_logs` was taught to read a deployment;
+  - an eval-harness bug was fixed: the runner resumed approvals with the requester's claims, so
+    every admin-approved task failed.
+
+Each part was attacked by a fresh-context Claude Opus verifier that did not write it. Each
+finding became a failing test first and a passing one after the fix:
+
+- **mcp-ops (V06):** 95 attacks held.
+  - Attacks tried: forged, expired and re-signed tokens; 27 look-alike namespace and name
+    spellings; another thread's approval; 5 identical writes at once; a redelivery while the
+    first write was inside the backend.
+  - No auth bypass and no duplicate write.
+  - It found 6 defects, among them two ways to leave no audit row, and that a token minted for a
+    read could page on-call. Tokens are now bound to the tools they may call.
+- **Agent, API, stores and caches (V07):** no unapproved or duplicate write, no cross-user read,
+  no cross-group cache hit. It found 10 defects:
+  - two resumes could both submit one approval;
+  - after an admin approved, the rest of the turn ran as the admin;
+  - 16 parallel turns spent 4× a user's daily token allowance;
+  - an owner could reset a thread's status through the REST API.
+- **The browser end to end on the real stack** (`web/e2e-live`: Supabase login, chat, approval,
+  the operation on the simulator, a rejection) found three defects that every mocked test passed:
+  - the API sent no CORS headers;
+  - it accepted only HS256 while Supabase Auth signs ES256, so every real login was a 401;
+  - the approval dialog closed itself in development builds.
+
+![The approval dialog on the local stack](docs/img/phase3-approval-dialog.png)
+
+Limits:
+- These are 7B-model numbers; the hosted run is still to come.
+- The cluster is a simulator. The kind workflow that runs mcp-ops' contract tests against a
+  real cluster has not run on GitHub Actions yet.
+- The task set was reviewed by two models, not by an SRE.
+- mcp-ops counts each token's calls in process, and the live event stream is in process, so
+  both assume a single instance.
+- Not yet measured: the semantic cache on paraphrases (its 0.92 threshold is uncalibrated), a
+  fallback drill on the real stack, and Opus faithfulness on multi-turn answers.
+
+Decisions 40–47 in [`docs/decisions.md`](docs/decisions.md) record what changed and what was
+rejected.
+
 ## Architecture (Phase 1 slice)
 
 - **Corpus:** Kubernetes docs (`kubernetes/website`, CC BY 4.0) for the latest three minor
