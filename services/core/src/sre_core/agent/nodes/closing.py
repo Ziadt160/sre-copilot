@@ -74,7 +74,10 @@ def make_closing_nodes(ctx: Ctx) -> dict[str, Node]:
         else:
             content = state["answer"]
             citations = [Citation.model_validate(c) for c in state["citations"]]
-        await ctx.threads.add_message(_message(thread_id, turn, route, content, citations))
+        trace_run_id = config.get("configurable", {}).get("trace_run_id")
+        await ctx.threads.add_message(
+            _message(thread_id, turn, route, content, citations, trace_run_id)
+        )
         if state["final_kind"] == "abstain":
             ctx.emit(AbstainEvent(reason=content, sources=sources))
         else:
@@ -96,7 +99,12 @@ def make_closing_nodes(ctx: Ctx) -> dict[str, Node]:
 
 
 def _message(
-    thread_id: uuid.UUID, turn: int, route: str, content: str, citations: list[Citation]
+    thread_id: uuid.UUID,
+    turn: int,
+    route: str,
+    content: str,
+    citations: list[Citation],
+    trace_run_id: str | None,
 ) -> MessageRecord:
     return MessageRecord.model_validate(
         {
@@ -106,5 +114,6 @@ def _message(
             "content": content,
             "route": route,
             "citations": citations,
+            "trace_run_id": trace_run_id,
         }
     )

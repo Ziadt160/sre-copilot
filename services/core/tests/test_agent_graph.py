@@ -132,6 +132,32 @@ def pending_approval(events: list[Any]) -> uuid.UUID:
     return req.approval_id
 
 
+async def test_each_turn_runs_inside_a_trace_whose_id_is_saved_on_the_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Found wiring LangSmith: nothing opened the turn's root run, so no trace was recorded and
+    # feedback had no trace id to attach to.
+    from contextlib import contextmanager
+
+    from sre_core.agent import factory
+    from sre_core.review.tracing import TurnTrace
+
+    opened: list[dict[str, Any]] = []
+
+    @contextmanager
+    def fake_trace(settings: Any, **meta: Any) -> Any:
+        opened.append(meta)
+        yield TurnTrace(run_id=f"run-{len(opened)}")
+
+    monkeypatch.setattr(factory, "turn_trace", fake_trace)
+    h = build(replies={"rewrite": [rewrite("What is a Pod?")], "router": [route("simple")]})
+    await h.start()
+    await h.turn("what is a pod")
+    assert opened == [{"thread_id": h.thread_id, "turn": 1, "user_sub": ALICE.sub}]
+    answer = (await h.threads.messages(ALICE, h.thread_id))[-1]
+    assert answer.role == "assistant" and answer.trace_run_id == "run-1"
+
+
 # -- routes ------------------------------------------------------------------------------
 
 

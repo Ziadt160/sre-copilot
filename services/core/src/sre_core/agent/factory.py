@@ -32,6 +32,7 @@ from sre_core.agent.ports import (
 )
 from sre_core.agent.state import new_turn_input
 from sre_core.retrieval import Retriever
+from sre_core.review.tracing import turn_trace
 from sre_shared.config import AgentConfig
 from sre_shared.contracts.agent import AGENT_EVENT, AgentEvent, ErrorEvent, TurnEvent
 from sre_shared.contracts.ops import ApprovalRecord, NamespacePolicy
@@ -47,14 +48,22 @@ class LangGraphChatAgent:
         self._graph = build_graph(ctx, checkpointer)
         self._locks: defaultdict[uuid.UUID, asyncio.Lock] = defaultdict(asyncio.Lock)
 
-    def _config(self, claims: Claims, thread_id: uuid.UUID, approver: Claims | None = None) -> Any:
+    def _config(
+        self,
+        claims: Claims,
+        thread_id: uuid.UUID,
+        approver: Claims | None = None,
+        trace_run_id: str | None = None,
+    ) -> Any:
         """`claims` is who the turn runs as (the requester); `approver` is used only to check an
-        approval."""
+        approval; `trace_run_id` is the turn's LangSmith root run, saved on the answer so feedback
+        can be synced to it."""
         return {
             "configurable": {
                 "thread_id": str(thread_id),
                 "claims": claims,
                 "approver": approver or claims,
+                "trace_run_id": trace_run_id,
             },
             "recursion_limit": self._ctx.cfg.limits.recursion_limit,
         }
@@ -80,8 +89,12 @@ class LangGraphChatAgent:
         async with self._locks[thread_id]:
             graph_input = new_turn_input(str(thread_id), turn, message)
             graph_input["requester"] = claims.model_dump(mode="json")
-            async for event in self._drive(graph_input, self._config(claims, thread_id)):
-                yield event
+            with turn_trace(
+                self._ctx.settings, thread_id=thread_id, turn=turn, user_sub=claims.sub
+            ) as trace:
+                config = self._config(claims, thread_id, trace_run_id=trace.run_id)
+                async for event in self._drive(graph_input, config):
+                    yield event
 
     async def resume(
         self, claims: Claims, thread_id: uuid.UUID, approval: ApprovalRecord
@@ -94,7 +107,6 @@ class LangGraphChatAgent:
             saved = snapshot.values.get("requester")
             # Run the rest of the turn as the user who asked, not as the approver.
             requester = Claims.model_validate(saved) if saved else claims
-            config = self._config(requester, thread_id, approver=claims)
             waiting = [i.value for t in snapshot.tasks for i in t.interrupts]
             if not any(
                 isinstance(v, dict) and v.get("approval_id") == str(approval.id) for v in waiting
@@ -107,10 +119,17 @@ class LangGraphChatAgent:
             if stored is None or stored.status == "pending":
                 yield ErrorEvent(type="ApprovalPending", detail="the approval is not decided yet")
                 return
-            async for event in self._drive(
-                Command(resume={"approval_id": str(approval.id)}), config
-            ):
-                yield event
+            with turn_trace(
+                self._ctx.settings, thread_id=thread_id, turn=approval.turn,
+                user_sub=requester.sub, route="action",
+            ) as trace:  # fmt: skip
+                config = self._config(
+                    requester, thread_id, approver=claims, trace_run_id=trace.run_id
+                )
+                async for event in self._drive(
+                    Command(resume={"approval_id": str(approval.id)}), config
+                ):
+                    yield event
 
 
 def make_chat_agent(
