@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from types import SimpleNamespace
 from typing import Any
 
@@ -163,11 +164,18 @@ def test_select_items_by_ids_and_seeded_subset() -> None:
         answers_cli.select_items(items, "fac-0001", 3, 0)
 
 
+def _help(*args: str) -> str:
+    # Typer forces a colour terminal when GITHUB_ACTIONS is set, so CI's help text carries ANSI
+    # codes inside option names; compare the plain text.
+    out = CliRunner().invoke(app, [*args, "--help"], env={"COLUMNS": "200"}).output
+    return re.sub(r"\x1b\[[0-9;]*m", "", out)
+
+
 def test_answers_commands_are_registered() -> None:
-    out = CliRunner().invoke(app, ["answers", "--help"]).output
+    out = _help("answers")
     for cmd in ("run", "label", "calibrate"):
         assert cmd in out
-    run_help = CliRunner().invoke(app, ["answers", "run", "--help"]).output
+    run_help = _help("answers", "run")
     for flag in ("--experiment", "--model", "--judge", "--repeat", "--items", "--subset", "--seed"):
         assert flag in run_help
 
