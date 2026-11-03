@@ -1,7 +1,7 @@
 # Answer-path defaults (sre_shared.models.AnswerConfig). Every value is to be set by an
 # experiment on the golden set; eval runs stamp the config they used.
 model: groq:openai/gpt-oss-20b    # user traffic; lab volume runs pass --model ollama:qwen2.5:7b
-k: 5                              # chunks given to the model (K sweep 3/5/8 in Phase 2)
+k: 3                              # chunks given to the model (decision 49: 3 ties 5 at 34% fewer tokens)
 relevance_floor: 0.0              # abstain below this best-chunk dense similarity (to be measured)
 max_tokens: 1024                  # ceiling; gpt-oss reasoning counts against it (decision 34)
 temperature: 0.0

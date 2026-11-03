@@ -110,6 +110,30 @@ Limits:
 - The embedding times (gte-small 5,745 s on the CPU before a later 1.7× batching speedup;
   BGE 488–563 s on an RTX 4060 Ti) compare machines as much as models.
 
+## Phase 2: retrieval and answers
+
+Phase 2 tested each retrieval and answer technique against the Phase 1 baseline on golden v1
+(69 questions; paired bootstrap, 95% intervals). A technique stayed only if it won; answers were
+judged by Claude Opus (decision 39: 27 of 28 agreement with the labelled set, kappa 0.89).
+
+| Change | Result | Kept? |
+|---|---|---|
+| Rerank the top 20 with bge-reranker-base | recall@5 +0.087 [+0.014, +0.174], MRR@10 +0.150 [+0.070, +0.234], better on both halves | **Yes** (decision 33) |
+| 256-token chunks instead of 510 | recall@5 −0.087 [−0.174, −0.014] | No (37) |
+| 64-token chunk overlap | +0.014 [−0.029, +0.058], a tie, 8% more chunks | No (37) |
+| Embed the body without the section header | recall@5 −0.101 [−0.174, −0.043] | No (37) |
+| fp16 `halfvec` instead of fp32 | 99.1% of the fp32 top 10, identical recall@5, half the bytes | **Yes** (35) |
+| Top 3 chunks to the model instead of 5 | faithfulness +0.003 [−0.029, +0.036], a tie, 34% fewer prompt tokens; 5 of 69 abstain instead of 2 | **Yes** (49) |
+| Sentence compression of the 5 chunks | faithfulness −0.023 [−0.060, +0.012], 12% fewer tokens | No (50) |
+
+With the reranker and 5 chunks, answers scored faithfulness 0.947 and answer relevancy 0.985
+(Opus judge, run 33); with 3 chunks, 0.947 and 0.977 (run 59). Free judges reached at best kappa
+0.29 against the labels, so the Opus judge is used for lab measurements and CI keeps the
+judge-free metrics (citation hit, abstention, tokens).
+
+Still to run: the read-replica load test (replica routing is built and tested; the sweep needs
+more memory for Docker than the lab machine currently allows).
+
 ## Phase 3: the agent
 
 The agent is a fixed LangGraph graph: rewrite the follow-up, check the answer cache, route to
