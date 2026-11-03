@@ -22,7 +22,9 @@ from sre_shared.testing.seed import create_corpus_version
 
 pytestmark = pytest.mark.integration
 
-CFG = CacheSettings(exact_ttl_s=3600, semantic_ttl_s=86400, semantic_min_similarity=0.92)
+CFG = CacheSettings(
+    exact_ttl_s=3600, semantic_ttl_s=86400, semantic_min_similarity=0.92, semantic_enabled=True
+)
 CITE = Citation(chunk_id=1, source_path="x.md", k8s_version="1.31", url="https://x", title="X")
 PROMPT = "p1"
 QUERY = "what is the way to restart a deployment?"

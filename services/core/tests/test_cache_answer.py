@@ -23,7 +23,9 @@ from sre_shared.models import Citation, Claims
 from sre_shared.settings import Settings
 from sre_shared.testing.seed import create_corpus_version
 
-CFG = CacheSettings(exact_ttl_s=3600, semantic_ttl_s=86400, semantic_min_similarity=0.92)
+CFG = CacheSettings(
+    exact_ttl_s=3600, semantic_ttl_s=86400, semantic_min_similarity=0.92, semantic_enabled=True
+)
 TEAM_A = Claims(sub="a", groups=["team-a"])
 TEAM_B = Claims(sub="b", groups=["team-b"])
 ANON = Claims(sub="anon", role="anon")
@@ -246,7 +248,7 @@ async def test_semantic_refuses_actions(
     assert n["n"] == 0  # type: ignore[index]
 
 
-async def test_both_tiers_via_factory(
+async def test_the_factory_serves_only_the_exact_tier_by_default(
     pool: AsyncConnectionPool, version: int, clock: list[datetime]
 ) -> None:
     c = make_answer_cache(
@@ -275,7 +277,7 @@ async def test_both_tiers_via_factory(
         prompt_version=PROMPT,
     )
     assert exact is not None and exact.cache == "exact"
-    assert sem is not None and sem.cache == "semantic"
+    assert sem is None  # the semantic tier is off in config/agent.yaml (decision 48)
     for other in (TEAM_B, ANON):
         for q in ("how do I restart a deployment?", "what is the way to restart a deployment?"):
             assert (

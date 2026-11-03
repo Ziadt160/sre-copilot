@@ -197,6 +197,8 @@ class CacheSettings(_Strict):
     exact_ttl_s: int = Field(ge=0)
     semantic_ttl_s: int = Field(ge=0)
     semantic_min_similarity: float = Field(gt=0.0, le=1.0)
+    # Off unless a calibration shows a threshold with no wrong hits (docs/cache-calibration.md).
+    semantic_enabled: bool = False
 
 
 class BudgetSettings(_Strict):

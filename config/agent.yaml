@@ -37,7 +37,9 @@ fallback:
 cache:
   exact_ttl_s: 3600
   semantic_ttl_s: 86400
-  semantic_min_similarity: 0.92 # to calibrate on paraphrases; literal tokens must match exactly
+  semantic_min_similarity: 0.92 # literal tokens must match exactly as well
+  semantic_enabled: false       # decision 48: no threshold separated paraphrases from near-twin
+                                # questions with another answer (docs/cache-calibration.md)
 
 budgets:
   user_daily_tokens: 20000      # per user per day (Redis in the lab, Upstash in the demo)

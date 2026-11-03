@@ -189,8 +189,15 @@ Limits:
 - The task set was reviewed by two models, not by an SRE.
 - mcp-ops counts each token's calls in process, and the live event stream is in process, so
   both assume a single instance.
-- Not yet measured: the semantic cache on paraphrases (its 0.92 threshold is uncalibrated), a
-  fallback drill on the real stack, and Opus faithfulness on multi-turn answers.
+- Not yet measured: Opus faithfulness on multi-turn answers.
+
+Measured since: the **semantic cache is off** (decision 48). No similarity threshold separated
+paraphrases from same-topic questions with a different answer: at the planned 0.92, 23 of 50
+such near-twins would have been served a cached answer
+([`docs/cache-calibration.md`](docs/cache-calibration.md)). The exact-question cache stays. A
+**fallback drill** on the production router ([`docs/fallback-drill.md`](docs/fallback-drill.md))
+showed the next model serving within about a second when the first is exhausted or unreachable,
+and cited passages in under 10 ms when every provider is down.
 
 Decisions 40–47 in [`docs/decisions.md`](docs/decisions.md) record what changed and what was
 rejected.

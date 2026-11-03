@@ -115,7 +115,7 @@ class TwoTierAnswerCache:
                 if raw is not None:
                     hit = CachedAnswer.model_validate_json(raw)
                     return hit.model_copy(update={"cache": "exact"})
-            if self._pool is not None and self._embedder is not None:
+            if self._semantic_on():
                 return await self._semantic_lookup(
                     question, claims, corpus_version_id, prompt_version
                 )
@@ -142,12 +142,15 @@ class TwoTierAnswerCache:
                     answer.model_dump_json(),
                     ex=self._cfg.exact_ttl_s,
                 )
-            if self._pool is not None and self._embedder is not None and self._cfg.semantic_ttl_s:
+            if self._semantic_on() and self._cfg.semantic_ttl_s:
                 await self._semantic_store(answer, claims, corpus_version_id, prompt_version)
         except Exception:
             log.warning("answer cache store failed", exc_info=True)
 
     # -- semantic tier ------------------------------------------------------------------
+
+    def _semantic_on(self) -> bool:
+        return self._cfg.semantic_enabled and self._pool is not None and self._embedder is not None
 
     async def _embed(self, question: str) -> list[float]:
         assert self._embedder is not None

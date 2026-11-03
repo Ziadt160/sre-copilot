@@ -1,0 +1,207 @@
+{"id": "exs-0001-p1", "keep": true}
+{"id": "exs-0001-p2", "keep": true}
+{"id": "exs-0001-c", "keep": true}
+{"id": "exs-0002-p1", "keep": true}
+{"id": "exs-0002-p2", "keep": true}
+{"id": "exs-0002-c", "keep": true}
+{"id": "exs-0003-p1", "keep": true}
+{"id": "exs-0003-p2", "keep": false, "reason": "shifts what-triggers to how-it-updates"}
+{"id": "exs-0003-c", "keep": true}
+{"id": "exs-0004-p1", "keep": true}
+{"id": "exs-0004-p2", "keep": false, "reason": "narrows to resource allocation, adds enable/disable"}
+{"id": "exs-0004-c", "keep": false, "reason": "off-topic (unrelated Pod field)"}
+{"id": "exs-0005-p1", "keep": true}
+{"id": "exs-0005-p2", "keep": true}
+{"id": "exs-0005-c", "keep": true}
+{"id": "exs-0006-p1", "keep": true}
+{"id": "exs-0006-p2", "keep": true}
+{"id": "exs-0006-c", "keep": true}
+{"id": "exs-0007-p1", "keep": true}
+{"id": "exs-0007-p2", "keep": true}
+{"id": "exs-0007-c", "keep": true}
+{"id": "exs-0008-p1", "keep": true}
+{"id": "exs-0008-p2", "keep": true}
+{"id": "exs-0008-c", "keep": true}
+{"id": "exs-0010-p1", "keep": true}
+{"id": "exs-0010-p2", "keep": true}
+{"id": "exs-0010-c", "keep": false, "reason": "confused field: status.active is a Job count"}
+{"id": "exs-0011-p1", "keep": true}
+{"id": "exs-0011-p2", "keep": true}
+{"id": "exs-0011-c", "keep": true}
+{"id": "exs-0012-p1", "keep": false, "reason": "changes meaning: field set alongside the flag"}
+{"id": "exs-0012-p2", "keep": true}
+{"id": "exs-0012-c", "keep": false, "reason": "nonsensical premise"}
+{"id": "exs-0013-p1", "keep": true}
+{"id": "exs-0013-p2", "keep": true}
+{"id": "exs-0013-c", "keep": false, "reason": "off-topic feature, fabricated flag"}
+{"id": "exs-0014-p1", "keep": true}
+{"id": "exs-0014-p2", "keep": true}
+{"id": "exs-0014-c", "keep": false, "reason": "off-topic, unrelated flag"}
+{"id": "exs-0015-p1", "keep": true}
+{"id": "exs-0015-p2", "keep": false, "reason": "presupposes value is a service"}
+{"id": "exs-0015-c", "keep": true}
+{"id": "exs-0016-p1", "keep": true}
+{"id": "exs-0016-p2", "keep": true}
+{"id": "exs-0016-c", "keep": true}
+{"id": "exs-0017-p1", "keep": true}
+{"id": "exs-0017-p2", "keep": true}
+{"id": "exs-0017-c", "keep": true}
+{"id": "exs-0018-p1", "keep": true}
+{"id": "exs-0018-p2", "keep": true}
+{"id": "exs-0018-c", "keep": true}
+{"id": "exs-0019-p1", "keep": false, "reason": "changes kind to MutatingWebhookConfiguration"}
+{"id": "exs-0019-p2", "keep": true}
+{"id": "exs-0019-c", "keep": true}
+{"id": "exs-0020-p1", "keep": false, "reason": "asks how value is determined, not what it produces"}
+{"id": "exs-0020-p2", "keep": true}
+{"id": "exs-0020-c", "keep": true}
+{"id": "exs-0021-p1", "keep": true}
+{"id": "exs-0021-p2", "keep": true}
+{"id": "exs-0021-c", "keep": true}
+{"id": "exs-0022-p1", "keep": true}
+{"id": "exs-0022-p2", "keep": true}
+{"id": "exs-0022-c", "keep": true}
+{"id": "exs-0023-p1", "keep": true}
+{"id": "exs-0023-p2", "keep": false, "reason": "widens: adds why it was removed"}
+{"id": "exs-0023-c", "keep": false, "reason": "off-topic and nonsensical"}
+{"id": "exs-0024-p1", "keep": true}
+{"id": "exs-0024-p2", "keep": true}
+{"id": "exs-0024-c", "keep": true}
+{"id": "exs-0025-p1", "keep": true}
+{"id": "exs-0025-p2", "keep": true}
+{"id": "exs-0025-c", "keep": false, "reason": "nonsensical premise (runtime-generated Go type)"}
+{"id": "exs-0026-p1", "keep": true}
+{"id": "exs-0026-p2", "keep": false, "reason": "asks why OOMKilled, not why lookups fail"}
+{"id": "exs-0026-c", "keep": true}
+{"id": "exs-0027-p1", "keep": false, "reason": "wrong PLEG expansion, narrows to a command"}
+{"id": "exs-0027-p2", "keep": true}
+{"id": "exs-0027-c", "keep": true}
+{"id": "exs-0029-p1", "keep": true}
+{"id": "exs-0029-p2", "keep": true}
+{"id": "exs-0029-c", "keep": false, "reason": "unnatural text referencing the original question"}
+{"id": "exs-0030-p1", "keep": true}
+{"id": "exs-0030-p2", "keep": true}
+{"id": "exs-0030-c", "keep": true}
+{"id": "exs-0031-p1", "keep": true}
+{"id": "exs-0031-p2", "keep": false, "reason": "drops Pod-level qualifier"}
+{"id": "exs-0031-c", "keep": true}
+{"id": "exs-0032-p1", "keep": true}
+{"id": "exs-0032-p2", "keep": false, "reason": "widens: adds why crictl is slow"}
+{"id": "exs-0032-c", "keep": true}
+{"id": "exs-0035-p1", "keep": true}
+{"id": "exs-0035-p2", "keep": true}
+{"id": "exs-0035-c", "keep": true}
+{"id": "exs-0036-p1", "keep": true}
+{"id": "exs-0036-p2", "keep": true}
+{"id": "exs-0036-c", "keep": true}
+{"id": "exs-0037-p1", "keep": false, "reason": "drops resourceClaimName field literal"}
+{"id": "exs-0037-p2", "keep": false, "reason": "changes field literal (adds gpu)"}
+{"id": "exs-0037-c", "keep": false, "reason": "off-topic (generic volumes)"}
+{"id": "fac-0001-p1", "keep": true}
+{"id": "fac-0001-p2", "keep": false, "reason": "shifts to how-to diagnose latency"}
+{"id": "fac-0001-c", "keep": true}
+{"id": "fac-0003-p1", "keep": true}
+{"id": "fac-0003-p2", "keep": false, "reason": "narrows to liveness probe"}
+{"id": "fac-0003-c", "keep": true}
+{"id": "fac-0005-p1", "keep": true}
+{"id": "fac-0005-p2", "keep": false, "reason": "widens: adds why kubelet fails"}
+{"id": "fac-0005-c", "keep": true}
+{"id": "fac-0007-p1", "keep": true}
+{"id": "fac-0007-p2", "keep": true}
+{"id": "fac-0007-c", "keep": false, "reason": "off-topic (network plugins)"}
+{"id": "fac-0010-p1", "keep": true}
+{"id": "fac-0010-p2", "keep": true}
+{"id": "fac-0010-c", "keep": true}
+{"id": "fac-0011-p1", "keep": true}
+{"id": "fac-0011-p2", "keep": true}
+{"id": "fac-0011-c", "keep": false, "reason": "off-topic (NetworkPolicy)"}
+{"id": "fac-0012-p1", "keep": false, "reason": "changes literal: DRA devices to nodes"}
+{"id": "fac-0012-p2", "keep": false, "reason": "changes literal: DRA devices to nodes"}
+{"id": "fac-0012-c", "keep": true}
+{"id": "fac-0013-p1", "keep": true}
+{"id": "fac-0013-p2", "keep": true}
+{"id": "fac-0013-c", "keep": false, "reason": "nonsensical (topologyKey instead of podAffinity)"}
+{"id": "fac-0014-p1", "keep": true}
+{"id": "fac-0014-p2", "keep": false, "reason": "asks for the feature list, not where to see it"}
+{"id": "fac-0014-c", "keep": true}
+{"id": "fac-0015-p1", "keep": true}
+{"id": "fac-0015-p2", "keep": true}
+{"id": "fac-0015-c", "keep": true}
+{"id": "fac-0016-p1", "keep": true}
+{"id": "fac-0016-p2", "keep": false, "reason": "changes to which-is-better"}
+{"id": "fac-0016-c", "keep": false, "reason": "same answer as base (paraphrase)"}
+{"id": "fac-0017-p1", "keep": true}
+{"id": "fac-0017-p2", "keep": true}
+{"id": "fac-0017-c", "keep": false, "reason": "off-topic (scheduler role)"}
+{"id": "fac-0018-p1", "keep": true}
+{"id": "fac-0018-p2", "keep": true}
+{"id": "fac-0018-c", "keep": true}
+{"id": "fac-0019-p1", "keep": true}
+{"id": "fac-0019-p2", "keep": true}
+{"id": "fac-0019-c", "keep": true}
+{"id": "fac-0020-p1", "keep": true}
+{"id": "fac-0020-p2", "keep": true}
+{"id": "fac-0020-c", "keep": true}
+{"id": "fac-0021-p1", "keep": true}
+{"id": "fac-0021-p2", "keep": true}
+{"id": "fac-0021-c", "keep": true}
+{"id": "fac-0022-p1", "keep": true}
+{"id": "fac-0022-p2", "keep": true}
+{"id": "fac-0022-c", "keep": true}
+{"id": "fac-0023-p1", "keep": false, "reason": "polarity flipped (still present vs deleted)"}
+{"id": "fac-0023-p2", "keep": true}
+{"id": "fac-0023-c", "keep": true}
+{"id": "fac-0024-p1", "keep": true}
+{"id": "fac-0024-p2", "keep": true}
+{"id": "fac-0024-c", "keep": true}
+{"id": "fac-0025-p1", "keep": true}
+{"id": "fac-0025-p2", "keep": true}
+{"id": "fac-0025-c", "keep": true}
+{"id": "fac-0027-p1", "keep": false, "reason": "changes meaning: can I use alpha commands"}
+{"id": "fac-0027-p2", "keep": false, "reason": "changes meaning: can I run alpha commands"}
+{"id": "fac-0027-c", "keep": true}
+{"id": "fac-0029-p1", "keep": false, "reason": "phase changed to command"}
+{"id": "fac-0029-p2", "keep": true}
+{"id": "fac-0029-c", "keep": true}
+{"id": "fac-0030-p1", "keep": true}
+{"id": "fac-0030-p2", "keep": true}
+{"id": "fac-0030-c", "keep": false, "reason": "nonsensical (update accepted, delete rejected)"}
+{"id": "fac-0034-p1", "keep": true}
+{"id": "fac-0034-p2", "keep": true}
+{"id": "fac-0034-c", "keep": true}
+{"id": "fac-0036-p1", "keep": true}
+{"id": "fac-0036-p2", "keep": true}
+{"id": "fac-0036-c", "keep": true}
+{"id": "fac-0039-p1", "keep": true}
+{"id": "fac-0039-p2", "keep": true}
+{"id": "fac-0039-c", "keep": false, "reason": "nonsensical/off-topic (PDB version on Windows)"}
+{"id": "fac-0040-p1", "keep": true}
+{"id": "fac-0040-p2", "keep": true}
+{"id": "fac-0040-c", "keep": true}
+{"id": "fac-0042-p1", "keep": true}
+{"id": "fac-0042-p2", "keep": true}
+{"id": "fac-0042-c", "keep": true}
+{"id": "fac-0044-p1", "keep": true}
+{"id": "fac-0044-p2", "keep": true}
+{"id": "fac-0044-c", "keep": false, "reason": "off-topic (listing nodes)"}
+{"id": "fac-0045-p1", "keep": true}
+{"id": "fac-0045-p2", "keep": false, "reason": "widens: adds memory request"}
+{"id": "fac-0045-c", "keep": false, "reason": "same answer as base (paraphrase)"}
+{"id": "fac-0047-p1", "keep": true}
+{"id": "fac-0047-p2", "keep": false, "reason": "widens: adds why"}
+{"id": "fac-0047-c", "keep": false, "reason": "same answer as base (paraphrase)"}
+{"id": "fac-0048-p1", "keep": true}
+{"id": "fac-0048-p2", "keep": false, "reason": "widens: adds how to specify"}
+{"id": "fac-0048-c", "keep": true}
+{"id": "fac-0050-p1", "keep": false, "reason": "changes container to pod"}
+{"id": "fac-0050-p2", "keep": true}
+{"id": "fac-0050-c", "keep": true}
+{"id": "fac-0052-p1", "keep": true}
+{"id": "fac-0052-p2", "keep": true}
+{"id": "fac-0052-c", "keep": true}
+{"id": "fac-0058-p1", "keep": true}
+{"id": "fac-0058-p2", "keep": true}
+{"id": "fac-0058-c", "keep": true}
+{"id": "fac-0060-p1", "keep": true}
+{"id": "fac-0060-p2", "keep": false, "reason": "widens: adds why it stops working"}
+{"id": "fac-0060-c", "keep": true}
