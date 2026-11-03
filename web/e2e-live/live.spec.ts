@@ -44,6 +44,21 @@ test("a restart waits for approval, then runs once on the cluster", async ({ pag
   await shot(page, "operation-succeeded");
 });
 
+test("an outage opens an incident: escalated at once, or confirmed by the operator", async ({ page }) => {
+  // Two designed paths (decision 41's routes): the escalate route opens the incident and pages
+  // on-call without asking; on the action route the user confirms create_incident like a write.
+  await ask(page, "Checkout in shop is down for every customer right now. Page the on-call engineer.");
+  const escalated = page.getByText(/Escalated to a human/);
+  const dialog = page.getByRole("dialog", { name: /Approve action: create_incident/ });
+  await expect(escalated.or(dialog)).toBeVisible();
+  if (await dialog.isVisible()) {
+    await dialog.getByRole("button", { name: "Approve", exact: true }).click();
+    await expect(page.getByTestId("operation").last()).toContainText("succeeded");
+  }
+  await expect(page.getByTestId("answer").last()).toContainText(/incident/i);
+  await shot(page, "incident");
+});
+
 test("a rejected scale runs nothing", async ({ page }) => {
   await ask(page, "Scale the web deployment in shop to 4 replicas.");
   const dialog = page.getByRole("dialog", { name: /Approve action: scale_deployment/ });
